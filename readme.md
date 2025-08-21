@@ -20,6 +20,22 @@
 - 분산 학습 오케스트레이션, AutoML, NAS는 제외.
 - 완전한 브라우저 골드-스탠다드 UX(캔버스 줌/미니맵 등)는 MVP 이후.
 
+### 1.3 Status
+- Core compiler: ✅
+- Lazy layers (Conv1d/Linear/BatchNorm1d): ✅
+- Sequence support (Permute/GRUBlock): ✅
+- Merge (Concat): ✅  |  Add: ⬜
+- Validation (NODE_SPECS): ⬜
+- Export (TorchScript/ONNX): ⬜
+- Templates (HybridCMI): ⬜
+- GUI (Gradio/Streamlit): ⬜
+- Tests (unit/integration): ⬜
+
+### 1.4 Next Up
+1) Add 머지 노드 구현  
+2) NODE_SPECS 기반 검증기 추가 (레이아웃/랭크/파라미터)  
+3) Export 유틸 (TorchScript/ONNX) + Netron 가이드  
+4) 커스텀 블록(SE/Residual/Attention) 등록 및 HybridCMI 템플릿 스모크 테스트
 ---
 
 ## 2. 시스템 구성
