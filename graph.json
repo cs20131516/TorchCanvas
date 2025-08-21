@@ -1,0 +1,16 @@
+{
+    "version": "0.1",
+    "metadata": {"name": "demo"},
+    "nodes": [
+      {"id": "inp", "type": "Input", "params": {}},
+      {"id": "conv", "type": "Conv1d", "params": {"out_channels": 64, "kernel_size": 5, "padding": "same"}},
+      {"id": "relu", "type": "ReLU", "params": {}},
+      {"id": "perm", "type": "Permute_BCT_to_BTH", "params": {}},
+      {"id": "gru", "type": "GRUBlock", "params": {"hidden_size": 128, "out": "last"}},
+      {"id": "fc", "type": "Linear", "params": {"out_features": 18}}
+    ],
+    "edges": [["inp","conv"], ["conv","relu"], ["relu","perm"], ["perm","gru"], ["gru","fc"]],
+    "inputs": ["inp"],
+    "outputs": ["fc"]
+  }
+  

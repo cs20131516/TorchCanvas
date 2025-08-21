@@ -85,6 +85,24 @@ def _p_bth_to_bct(**kwargs):
             return x.transpose(1, 2).contiguous()
     return P()
 
+@LayerFactory.register("GRUBlockH0")
+def _gru_block_h0(hidden_size:int, num_layers:int=1, bidirectional:bool=True, out:str="last", **kwargs):
+    class GRUBlockH0(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.hsz = hidden_size; self.nl = num_layers; self.bd = bidirectional
+            self.out_mode = out; self.gru=None
+        def forward(self, x, h0=None):            # ← h0를 입력으로 받음
+            if self.gru is None:
+                self.gru = nn.GRU(x.size(-1), self.hsz, num_layers=self.nl,
+                                   bidirectional=self.bd, batch_first=True).to(x.device, x.dtype)
+            if h0 is None:
+                dirs = 2 if self.bd else 1
+                h0 = torch.zeros(self.nl*dirs, x.size(0), self.hsz, device=x.device, dtype=x.dtype)
+            y, _ = self.gru(x, h0)
+            return y[:, -1, :] if self.out_mode=="last" else y.mean(dim=1)
+    return GRUBlockH0()
+
 @LayerFactory.register("GRUBlock")
 def _gru_block(hidden_size:int, num_layers:int=1, bidirectional:bool=True,
                out:str="last", **kwargs):
@@ -204,7 +222,7 @@ class GraphModule(nn.Module):
             mod = self.nodes[nid]
 
             if typ == "Concat":
-                x = mod(*xs)
+                x = mod(*xs) if len(xs) > 1 else mod(xs[0] if xs else None)
             else:
                 x_in = xs[0] if xs else None
                 x = mod(x_in)
