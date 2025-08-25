@@ -4,6 +4,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Dict, List, Any
 import streamlit as st
+import streamlit.components.v1 as components
 
 st.set_page_config(page_title="TorchCanvas — Code Preview", layout="wide")
 
@@ -44,7 +45,179 @@ def _init_state():
     ss.setdefault("edges", [])
     ss.setdefault("inputs", [])
     ss.setdefault("outputs", [])
+    ss.setdefault("tensor_shapes", {})  # 노드별 텐서 형태 저장
 _init_state()
+
+# ---------- 텐서 형태 추정 함수 ----------
+def estimate_tensor_shape(node_id: str, node_type: str, params: dict, input_shapes: List[tuple]) -> tuple:
+    """노드의 출력 텐서 형태를 추정"""
+    if not input_shapes:
+        return (1, 3, 224, 224)  # 기본 입력 형태
+    
+    input_shape = input_shapes[0]  # 첫 번째 입력 사용
+    
+    if node_type == "Input":
+        return input_shape
+    
+    elif node_type == "Conv2d":
+        B, C, H, W = input_shape
+        out_channels = params.get("out_channels", 64)
+        kernel_size = params.get("kernel_size", 3)
+        stride = params.get("stride", 1)
+        padding = params.get("padding", "same")
+        
+        if padding == "same":
+            pad = kernel_size // 2
+        else:
+            pad = int(padding)
+        
+        H_out = (H + 2 * pad - kernel_size) // stride + 1
+        W_out = (W + 2 * pad - kernel_size) // stride + 1
+        return (B, out_channels, H_out, W_out)
+    
+    elif node_type == "MaxPool2d":
+        B, C, H, W = input_shape
+        kernel_size = params.get("kernel_size", 2)
+        stride = params.get("stride", kernel_size)
+        
+        H_out = (H - kernel_size) // stride + 1
+        W_out = (W - kernel_size) // stride + 1
+        return (B, C, H_out, W_out)
+    
+    elif node_type == "ReLU":
+        return input_shape  # 형태 유지
+    
+    elif node_type == "LRN":
+        return input_shape  # 형태 유지
+    
+    elif node_type == "Flatten":
+        B, C, H, W = input_shape
+        return (B, C * H * W)
+    
+    elif node_type == "Linear":
+        B = input_shape[0]
+        out_features = params.get("out_features", 1000)
+        return (B, out_features)
+    
+    # 기본적으로 입력 형태 유지
+    return input_shape
+
+# ---------- 시각적 네트워크 다이어그램 생성 ----------
+def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_shapes: Dict[str, tuple]) -> str:
+    """HTML/CSS로 네트워크 다이어그램 생성"""
+    
+    html = """
+    <style>
+    .network-container {
+        font-family: 'Courier New', monospace;
+        background: #f8f9fa;
+        padding: 20px;
+        border-radius: 10px;
+        margin: 10px 0;
+    }
+    .layer {
+        background: white;
+        border: 2px solid #007bff;
+        border-radius: 8px;
+        padding: 15px;
+        margin: 10px 0;
+        text-align: center;
+        position: relative;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .layer-name {
+        font-weight: bold;
+        color: #007bff;
+        margin-bottom: 5px;
+    }
+    .tensor-shape {
+        font-family: 'Courier New', monospace;
+        background: #e9ecef;
+        padding: 5px 10px;
+        border-radius: 4px;
+        margin: 5px 0;
+        font-size: 12px;
+    }
+    .status-check {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        color: #28a745;
+        font-size: 18px;
+    }
+    .arrow {
+        text-align: center;
+        font-size: 20px;
+        color: #6c757d;
+        margin: 5px 0;
+    }
+    .params {
+        font-size: 11px;
+        color: #6c757d;
+        margin-top: 5px;
+    }
+    </style>
+    <div class="network-container">
+    """
+    
+    # 노드들을 순서대로 정렬 (간단한 위상정렬)
+    node_order = []
+    in_edges = {n["id"]: [] for n in nodes}
+    for src, dst in edges:
+        in_edges[dst].append(src)
+    
+    # 입력 노드부터 시작
+    for node in nodes:
+        if node["id"] in st.session_state.inputs:
+            node_order.append(node)
+    
+    # 나머지 노드들 추가 (간단한 방식)
+    for node in nodes:
+        if node not in node_order:
+            node_order.append(node)
+    
+    for i, node in enumerate(node_order):
+        node_id = node["id"]
+        node_type = node["type"]
+        params = node.get("params", {})
+        
+        # 텐서 형태 가져오기
+        input_shapes = []
+        for src, dst in edges:
+            if dst == node_id and src in tensor_shapes:
+                input_shapes.append(tensor_shapes[src])
+        
+        if node_id in tensor_shapes:
+            output_shape = tensor_shapes[node_id]
+        else:
+            output_shape = estimate_tensor_shape(node_id, node_type, params, input_shapes)
+            st.session_state.tensor_shapes[node_id] = output_shape
+        
+        # 파라미터 문자열 생성
+        param_str = ""
+        if params:
+            param_items = []
+            for k, v in params.items():
+                if isinstance(v, (int, float, bool)):
+                    param_items.append(f"{k}={v}")
+                elif isinstance(v, str):
+                    param_items.append(f"{k}='{v}'")
+            param_str = ", ".join(param_items)
+        
+        html += f"""
+        <div class="layer">
+            <div class="status-check">✓</div>
+            <div class="layer-name">{node_type}</div>
+            <div class="tensor-shape">[{', '.join(map(str, output_shape))}]</div>
+            {f'<div class="params">{param_str}</div>' if param_str else ''}
+        </div>
+        """
+        
+        if i < len(node_order) - 1:
+            html += '<div class="arrow">↓</div>'
+    
+    html += "</div>"
+    return html
 
 # ---------- 코드 생성기 ----------
 def export_graph_to_python(graph: dict, class_name: str="ExportedModel") -> str:
@@ -449,11 +622,147 @@ st.sidebar.divider()
 if st.sidebar.button("그래프 초기화"):
     st.session_state.nodes.clear(); st.session_state.edges.clear()
     st.session_state.inputs.clear(); st.session_state.outputs.clear()
+    st.session_state.tensor_shapes.clear()
     st.rerun()
 
-# ---------- 메인: 탭 ----------
-st.title("TorchCanvas — GUI → PyTorch 코드 미리보기")
+# ---------- 시각적 네트워크 다이어그램 생성 ----------
+def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_shapes: Dict[str, tuple]) -> str:
+    """HTML/CSS로 네트워크 다이어그램 생성"""
+    
+    html = """
+    <style>
+    .network-container {
+        font-family: 'Courier New', monospace;
+        background: #f8f9fa;
+        padding: 20px;
+        border-radius: 10px;
+        margin: 10px 0;
+    }
+    .layer {
+        background: white;
+        border: 2px solid #007bff;
+        border-radius: 8px;
+        padding: 15px;
+        margin: 10px 0;
+        text-align: center;
+        position: relative;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .layer-name {
+        font-weight: bold;
+        color: #007bff;
+        margin-bottom: 5px;
+    }
+    .tensor-shape {
+        font-family: 'Courier New', monospace;
+        background: #e9ecef;
+        padding: 5px 10px;
+        border-radius: 4px;
+        margin: 5px 0;
+        font-size: 12px;
+    }
+    .status-check {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        color: #28a745;
+        font-size: 18px;
+    }
+    .arrow {
+        text-align: center;
+        font-size: 20px;
+        color: #6c757d;
+        margin: 5px 0;
+    }
+    .params {
+        font-size: 11px;
+        color: #6c757d;
+        margin-top: 5px;
+    }
+    </style>
+    <div class="network-container">
+    """
+    
+    # 노드들을 순서대로 정렬 (간단한 위상정렬)
+    node_order = []
+    in_edges = {n["id"]: [] for n in nodes}
+    for src, dst in edges:
+        in_edges[dst].append(src)
+    
+    # 입력 노드부터 시작
+    for node in nodes:
+        if node["id"] in st.session_state.inputs:
+            node_order.append(node)
+    
+    # 나머지 노드들 추가 (간단한 방식)
+    for node in nodes:
+        if node not in node_order:
+            node_order.append(node)
+    
+    for i, node in enumerate(node_order):
+        node_id = node["id"]
+        node_type = node["type"]
+        params = node.get("params", {})
+        
+        # 텐서 형태 가져오기
+        input_shapes = []
+        for src, dst in edges:
+            if dst == node_id and src in tensor_shapes:
+                input_shapes.append(tensor_shapes[src])
+        
+        if node_id in tensor_shapes:
+            output_shape = tensor_shapes[node_id]
+        else:
+            # 간단한 형태 추정
+            if not input_shapes:
+                output_shape = (1, 3, 224, 224)
+            else:
+                output_shape = input_shapes[0]  # 기본적으로 입력 형태 유지
+            st.session_state.tensor_shapes[node_id] = output_shape
+        
+        # 파라미터 문자열 생성
+        param_str = ""
+        if params:
+            param_items = []
+            for k, v in params.items():
+                if isinstance(v, (int, float, bool)):
+                    param_items.append(f"{k}={v}")
+                elif isinstance(v, str):
+                    param_items.append(f"{k}='{v}'")
+            param_items = param_items[:3]  # 최대 3개만 표시
+            param_str = ", ".join(param_items)
+        
+        html += f"""
+        <div class="layer">
+            <div class="status-check">✓</div>
+            <div class="layer-name">{node_type}</div>
+            <div class="tensor-shape">[{', '.join(map(str, output_shape))}]</div>
+            {f'<div class="params">{param_str}</div>' if param_str else ''}
+        </div>
+        """
+        
+        if i < len(node_order) - 1:
+            html += '<div class="arrow">↓</div>'
+    
+    html += "</div>"
+    return html
 
+# ---------- 메인: 시각적 네트워크 다이어그램 ----------
+st.title("TorchCanvas — 시각적 신경망 디자이너")
+
+# 네트워크 다이어그램 표시
+if st.session_state.nodes:
+    st.subheader("🔍 네트워크 아키텍처 시각화")
+    diagram_html = create_network_diagram(
+        st.session_state.nodes, 
+        st.session_state.edges, 
+        st.session_state.tensor_shapes
+    )
+    st.components.v1.html(diagram_html, height=400, scrolling=True)
+else:
+    st.info("노드를 추가하여 네트워크를 구성하세요.")
+
+# ---------- 텍스트 기반 노드/엣지 편집 ----------
 colA, colB = st.columns([1,1], gap="large")
 with colA:
     st.subheader("Nodes")
@@ -465,6 +774,7 @@ with colA:
             st.session_state.edges = [e for e in st.session_state.edges if e[0]!=del_id and e[1]!=del_id]
             if del_id in st.session_state.inputs: st.session_state.inputs.remove(del_id)
             if del_id in st.session_state.outputs: st.session_state.outputs.remove(del_id)
+            if del_id in st.session_state.tensor_shapes: del st.session_state.tensor_shapes[del_id]
             st.rerun()
 
 with colB:
@@ -564,6 +874,7 @@ if st.button("VGG-16 템플릿 로드"):
     st.session_state.edges = vgg16_template["edges"]
     st.session_state.inputs = vgg16_template["inputs"]
     st.session_state.outputs = vgg16_template["outputs"]
+    st.session_state.tensor_shapes.clear()
     st.rerun()
 
 if st.button("ResNet-18 템플릿 로드"):
@@ -596,4 +907,5 @@ if st.button("ResNet-18 템플릿 로드"):
     st.session_state.edges = resnet18_template["edges"]
     st.session_state.inputs = resnet18_template["inputs"]
     st.session_state.outputs = resnet18_template["outputs"]
+    st.session_state.tensor_shapes.clear()
     st.rerun()
