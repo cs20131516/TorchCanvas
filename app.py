@@ -8,34 +8,211 @@ import streamlit.components.v1 as components
 
 st.set_page_config(page_title="TorchCanvas — Code Preview", layout="wide")
 
-# ---------- 기본 노드 타입 스펙 (MVP) ----------
+# ---------- 개선된 노드 타입 스펙 (카테고리별) ----------
 NODE_SPECS = {
-    "Input": {"params": {}},
-    "Conv1d": {"params": {"out_channels": int, "kernel_size": int, "stride": (int, 1), "padding": ("same_or_int", "same")}},
-    "Conv2d": {"params": {"out_channels": int, "kernel_size": int, "stride": (int, 1), "padding": ("same_or_int", "same")}},
-    "BatchNorm1d": {"params": {"num_features": (int, 0)}},  # 0 → LazyBatchNorm1d
-    "BatchNorm2d": {"params": {"num_features": (int, 0)}},  # 0 → LazyBatchNorm2d
-    "Linear": {"params": {"out_features": int, "bias": (bool, True)}},
-    "ReLU": {"params": {}},
-    "Dropout": {"params": {"p": (float, 0.5)}},
-    "MaxPool1d": {"params": {"kernel_size": (int, 2), "stride": (int, None)}},
-    "MaxPool2d": {"params": {"kernel_size": (int, 2), "stride": (int, None)}},
-    "Concat": {"params": {"dim": (int, 1)}},
-    "Add": {"params": {}},
-    "Flatten": {"params": {"start_dim": (int, 1), "end_dim": (int, -1)}},
-    "Permute_BCT_to_BTH": {"params": {}},
-    "Permute_BTH_to_BCT": {"params": {}},
-    "GRUBlock": {"params": {
-        "hidden_size": int, "num_layers": (int, 1), "bidirectional": (bool, True),
-        "out": (["last","mean","max","seq"], "last")
-    }},
+    # 입력/출력
+    "Input": {
+        "params": {},
+        "category": "io",
+        "color": "#28a745",
+        "icon": "📥",
+        "description": "모델 입력"
+    },
+    "Output": {
+        "params": {},
+        "category": "io", 
+        "color": "#17a2b8",
+        "icon": "📤",
+        "description": "모델 출력"
+    },
+    
+    # 컨볼루션 레이어
+    "Conv1d": {
+        "params": {"out_channels": int, "kernel_size": int, "stride": (int, 1), "padding": ("same_or_int", "same")},
+        "category": "conv",
+        "color": "#ffc107",
+        "icon": "🔲",
+        "description": "1D 컨볼루션"
+    },
+    "Conv2d": {
+        "params": {"out_channels": int, "kernel_size": int, "stride": (int, 1), "padding": ("same_or_int", "same")},
+        "category": "conv",
+        "color": "#ffc107", 
+        "icon": "🔲",
+        "description": "2D 컨볼루션"
+    },
+    
+    # 정규화 레이어
+    "BatchNorm1d": {
+        "params": {"num_features": (int, 0)},
+        "category": "norm",
+        "color": "#6f42c1",
+        "icon": "📊",
+        "description": "1D 배치 정규화"
+    },
+    "BatchNorm2d": {
+        "params": {"num_features": (int, 0)},
+        "category": "norm",
+        "color": "#6f42c1",
+        "icon": "📊", 
+        "description": "2D 배치 정규화"
+    },
+    
+    # 활성화 함수
+    "ReLU": {
+        "params": {},
+        "category": "activation",
+        "color": "#007bff",
+        "icon": "⚡",
+        "description": "ReLU 활성화"
+    },
+    "Sigmoid": {
+        "params": {},
+        "category": "activation", 
+        "color": "#007bff",
+        "icon": "📈",
+        "description": "Sigmoid 활성화"
+    },
+    "Tanh": {
+        "params": {},
+        "category": "activation",
+        "color": "#007bff", 
+        "icon": "📈",
+        "description": "Tanh 활성화"
+    },
+    
+    # 풀링 레이어
+    "MaxPool1d": {
+        "params": {"kernel_size": (int, 2), "stride": (int, None)},
+        "category": "pool",
+        "color": "#fd7e14",
+        "icon": "🔽",
+        "description": "1D 최대 풀링"
+    },
+    "MaxPool2d": {
+        "params": {"kernel_size": (int, 2), "stride": (int, None)},
+        "category": "pool",
+        "color": "#fd7e14",
+        "icon": "🔽",
+        "description": "2D 최대 풀링"
+    },
+    "AvgPool2d": {
+        "params": {"kernel_size": (int, 2), "stride": (int, None)},
+        "category": "pool",
+        "color": "#fd7e14",
+        "icon": "🔽",
+        "description": "2D 평균 풀링"
+    },
+    
+    # 완전연결 레이어
+    "Linear": {
+        "params": {"out_features": int, "bias": (bool, True)},
+        "category": "fc",
+        "color": "#e83e8c",
+        "icon": "🔗",
+        "description": "완전연결 레이어"
+    },
+    
+    # 유틸리티
+    "Dropout": {
+        "params": {"p": (float, 0.5)},
+        "category": "util",
+        "color": "#6c757d",
+        "icon": "🎲",
+        "description": "드롭아웃"
+    },
+    "Flatten": {
+        "params": {"start_dim": (int, 1), "end_dim": (int, -1)},
+        "category": "util",
+        "color": "#6c757d",
+        "icon": "📏",
+        "description": "텐서 평탄화"
+    },
+    
+    # 결합 연산
+    "Concat": {
+        "params": {"dim": (int, 1)},
+        "category": "combine",
+        "color": "#20c997",
+        "icon": "🔗",
+        "description": "텐서 연결"
+    },
+    "Add": {
+        "params": {},
+        "category": "combine",
+        "color": "#20c997",
+        "icon": "➕",
+        "description": "텐서 덧셈"
+    },
+    
+    # 순열 연산
+    "Permute_BCT_to_BTH": {
+        "params": {},
+        "category": "permute",
+        "color": "#6f42c1",
+        "icon": "🔄",
+        "description": "BCT → BTH 변환"
+    },
+    "Permute_BTH_to_BCT": {
+        "params": {},
+        "category": "permute", 
+        "color": "#6f42c1",
+        "icon": "🔄",
+        "description": "BTH → BCT 변환"
+    },
+    
+    # 순환 신경망
+    "GRUBlock": {
+        "params": {
+            "hidden_size": int, "num_layers": (int, 1), "bidirectional": (bool, True),
+            "out": (["last","mean","max","seq"], "last")
+        },
+        "category": "rnn",
+        "color": "#dc3545",
+        "icon": "🔄",
+        "description": "GRU 블록"
+    },
+    
     # 컴포지트 블록들
-    "SEBlock": {"params": {"reduction": (int, 8)}},
-    "ResidualBlock": {"params": {"out_channels": int, "kernel_size": (int, 3), "stride": (int, 1)}},
-    "VGGBlock": {"params": {
-        "c1": int, "c2": int, "kernel_size": (int, 3), 
-        "use_lrn": (bool, False), "pool": (bool, True)
-    }},
+    "SEBlock": {
+        "params": {"reduction": (int, 8)},
+        "category": "composite",
+        "color": "#28a745",
+        "icon": "🎯",
+        "description": "Squeeze-and-Excitation"
+    },
+    "ResidualBlock": {
+        "params": {"out_channels": int, "kernel_size": (int, 3), "stride": (int, 1)},
+        "category": "composite",
+        "color": "#28a745",
+        "icon": "⏭️",
+        "description": "잔차 블록"
+    },
+    "VGGBlock": {
+        "params": {
+            "c1": int, "c2": int, "kernel_size": (int, 3), 
+            "use_lrn": (bool, False), "pool": (bool, True)
+        },
+        "category": "composite",
+        "color": "#28a745",
+        "icon": "🏗️",
+        "description": "VGG 스타일 블록"
+    },
+}
+
+# 카테고리별 그룹핑
+CATEGORIES = {
+    "io": "입력/출력",
+    "conv": "컨볼루션", 
+    "norm": "정규화",
+    "activation": "활성화",
+    "pool": "풀링",
+    "fc": "완전연결",
+    "util": "유틸리티",
+    "combine": "결합",
+    "permute": "순열",
+    "rnn": "순환신경망",
+    "composite": "컴포지트"
 }
 
 # ---------- 세션 상태 초기화 ----------
@@ -109,52 +286,99 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
     html = """
     <style>
     .network-container {
-        font-family: 'Courier New', monospace;
-        background: #f8f9fa;
-        padding: 20px;
-        border-radius: 10px;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 30px;
+        border-radius: 15px;
         margin: 10px 0;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.2);
     }
     .layer {
         background: white;
-        border: 2px solid #007bff;
-        border-radius: 8px;
-        padding: 15px;
-        margin: 10px 0;
+        border-radius: 12px;
+        padding: 20px;
+        margin: 15px 0;
         text-align: center;
         position: relative;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        transition: all 0.3s ease;
+        border-left: 5px solid;
+    }
+    .layer:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 12px 35px rgba(0,0,0,0.2);
+    }
+    .layer-header {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 10px;
+    }
+    .layer-icon {
+        font-size: 24px;
+        margin-right: 10px;
     }
     .layer-name {
         font-weight: bold;
-        color: #007bff;
-        margin-bottom: 5px;
+        font-size: 16px;
+        margin: 0;
+    }
+    .layer-id {
+        font-size: 12px;
+        color: #6c757d;
+        margin-top: 5px;
     }
     .tensor-shape {
         font-family: 'Courier New', monospace;
-        background: #e9ecef;
-        padding: 5px 10px;
-        border-radius: 4px;
-        margin: 5px 0;
-        font-size: 12px;
+        background: linear-gradient(45deg, #f8f9fa, #e9ecef);
+        padding: 8px 15px;
+        border-radius: 8px;
+        margin: 10px 0;
+        font-size: 13px;
+        font-weight: bold;
+        border: 1px solid #dee2e6;
     }
     .status-check {
         position: absolute;
-        top: 10px;
-        right: 10px;
+        top: 15px;
+        right: 15px;
         color: #28a745;
-        font-size: 18px;
+        font-size: 20px;
+        background: white;
+        border-radius: 50%;
+        width: 30px;
+        height: 30px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 2px 8px rgba(40, 167, 69, 0.3);
     }
     .arrow {
         text-align: center;
-        font-size: 20px;
-        color: #6c757d;
-        margin: 5px 0;
+        font-size: 24px;
+        color: white;
+        margin: 10px 0;
+        text-shadow: 0 2px 4px rgba(0,0,0,0.3);
     }
     .params {
-        font-size: 11px;
+        font-size: 12px;
         color: #6c757d;
-        margin-top: 5px;
+        margin-top: 10px;
+        padding: 8px;
+        background: #f8f9fa;
+        border-radius: 6px;
+        border-left: 3px solid #dee2e6;
+    }
+    .category-badge {
+        position: absolute;
+        top: 15px;
+        left: 15px;
+        font-size: 10px;
+        padding: 4px 8px;
+        border-radius: 12px;
+        color: white;
+        font-weight: bold;
+        text-transform: uppercase;
     }
     </style>
     <div class="network-container">
@@ -204,10 +428,20 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
                     param_items.append(f"{k}='{v}'")
             param_str = ", ".join(param_items)
         
+        # 카테고리 색상 가져오기
+        category_color = NODE_SPECS[node_type]["color"]
+        category_name = NODE_SPECS[node_type]["category"]
+        icon = NODE_SPECS[node_type]["icon"]
+        
         html += f"""
-        <div class="layer">
+        <div class="layer" style="border-left-color: {category_color};">
+            <div class="category-badge" style="background-color: {category_color};">{category_name}</div>
             <div class="status-check">✓</div>
-            <div class="layer-name">{node_type}</div>
+            <div class="layer-header">
+                <div class="layer-icon">{icon}</div>
+                <div class="layer-name">{node_type}</div>
+            </div>
+            <div class="layer-id">ID: {node_id}</div>
             <div class="tensor-shape">[{', '.join(map(str, output_shape))}]</div>
             {f'<div class="params">{param_str}</div>' if param_str else ''}
         </div>
@@ -281,6 +515,10 @@ def export_graph_to_python(graph: dict, class_name: str="ExportedModel") -> str:
             init_lines.append(f"self.{nid} = nn.LazyLinear({p['out_features']}, bias={p.get('bias', True)})")
         elif typ == "ReLU":
             init_lines.append(f"self.{nid} = nn.ReLU(inplace=True)")
+        elif typ == "Sigmoid":
+            init_lines.append(f"self.{nid} = nn.Sigmoid()")
+        elif typ == "Tanh":
+            init_lines.append(f"self.{nid} = nn.Tanh()")
         elif typ == "Dropout":
             init_lines.append(f"self.{nid} = nn.Dropout({p.get('p', 0.5)})")
         elif typ == "MaxPool1d":
@@ -342,7 +580,7 @@ def export_graph_to_python(graph: dict, class_name: str="ExportedModel") -> str:
             fwd.append(f"cache['{nid}'] = cache['{srcs[0]}'].transpose(1, 2).contiguous()")
         elif typ == "Permute_BTH_to_BCT":
             fwd.append(f"cache['{nid}'] = cache['{srcs[0]}'].transpose(1, 2).contiguous()")
-        elif typ in ("Conv1d","Conv2d","BatchNorm1d","BatchNorm2d","Linear","ReLU","Dropout","MaxPool1d","MaxPool2d","Flatten","GRUBlock","SEBlock","ResidualBlock","VGGBlock"):
+        elif typ in ("Conv1d","Conv2d","BatchNorm1d","BatchNorm2d","Linear","ReLU","Sigmoid","Tanh","Dropout","MaxPool1d","MaxPool2d","AvgPool2d","Flatten","GRUBlock","SEBlock","ResidualBlock","VGGBlock"):
             fwd.append(f"cache['{nid}'] = self.{nid}(cache['{srcs[0]}'])")
         else:
             fwd.append(f"# TODO: forward for '{typ}'")
@@ -562,44 +800,113 @@ if __name__ == "__main__":
 """
     return header + cls + main
 
-# ---------- 사이드바: 팔레트/노드 추가 ----------
-st.sidebar.title("TorchCanvas — Palette")
-with st.sidebar.form("add_node_form"):
-    nid = st.text_input("노드 ID", placeholder="예: conv1")
-    ntype = st.selectbox("노드 타입", list(NODE_SPECS.keys()), index=0)
-    params_spec = NODE_SPECS[ntype]["params"]
-    params = {}
-    for k, spec in params_spec.items():
-        if spec == int:
-            params[k] = st.number_input(k, value=1, step=1)
-        elif spec == float:
-            params[k] = st.number_input(k, value=0.5, step=0.1, format="%.4f")
-        elif spec == bool:
-            params[k] = st.checkbox(k, value=False)
-        elif spec == "same_or_int":
-            mode = st.selectbox(k, ["same", "int"], index=0)
-            params[k] = "same" if mode == "same" else int(st.number_input(f"{k} (int)", value=1, step=1))
-        elif isinstance(spec, tuple):
-            typ, default = spec
-            if typ == int:
-                val = st.number_input(k, value=default if default is not None else 0, step=1)
-                params[k] = int(val) if default is not None else (None if val==0 else int(val))
-            elif typ == float:
-                params[k] = float(st.number_input(k, value=float(default)))
-            elif typ == bool:
-                params[k] = st.checkbox(k, value=bool(default))
+# ---------- 개선된 사이드바: 시각적 팔레트 ----------
+st.sidebar.title("🎨 TorchCanvas — Palette")
+
+# 카테고리별 팔레트
+selected_category = st.sidebar.selectbox(
+    "카테고리 선택",
+    list(CATEGORIES.keys()),
+    format_func=lambda x: CATEGORIES[x],
+    index=0
+)
+
+# 선택된 카테고리의 블록들 표시
+st.sidebar.subheader(f"📂 {CATEGORIES[selected_category]}")
+
+# 카테고리별 블록들을 시각적으로 표시
+category_blocks = [name for name, spec in NODE_SPECS.items() if spec["category"] == selected_category]
+
+for block_name in category_blocks:
+    block_spec = NODE_SPECS[block_name]
+    
+    # 블록 카드 스타일
+    with st.sidebar.container():
+        col1, col2 = st.columns([1, 4])
+        with col1:
+            st.markdown(f"<div style='text-align: center; font-size: 20px;'>{block_spec['icon']}</div>", unsafe_allow_html=True)
+        with col2:
+            st.markdown(f"**{block_name}**")
+            st.caption(block_spec['description'])
+        
+        # 블록 추가 버튼
+        if st.button(f"➕ {block_name} 추가", key=f"add_{block_name}"):
+            # 자동으로 노드 ID 생성
+            base_name = block_name.lower()
+            existing_ids = [n["id"] for n in st.session_state.nodes]
+            counter = 1
+            while f"{base_name}{counter}" in existing_ids:
+                counter += 1
+            nid = f"{base_name}{counter}"
+            
+            # 기본 파라미터로 노드 추가
+            params = {}
+            for k, spec in block_spec["params"].items():
+                if isinstance(spec, tuple):
+                    typ, default = spec
+                    if typ == int:
+                        params[k] = default if default is not None else 1
+                    elif typ == float:
+                        params[k] = float(default) if default is not None else 0.5
+                    elif typ == bool:
+                        params[k] = bool(default) if default is not None else False
+                    else:
+                        params[k] = default
+                elif spec == int:
+                    params[k] = 64  # 기본값
+                elif spec == float:
+                    params[k] = 0.5
+                elif spec == bool:
+                    params[k] = True
+                elif spec == "same_or_int":
+                    params[k] = "same"
+                else:
+                    params[k] = spec
+            
+            st.session_state.nodes.append({"id": nid, "type": block_name, "params": params})
+            st.rerun()
+        
+        st.sidebar.divider()
+
+# 고급 설정 (접을 수 있는 섹션)
+with st.sidebar.expander("⚙️ 고급 설정"):
+    st.subheader("수동 노드 추가")
+    with st.form("manual_add_node_form"):
+        nid = st.text_input("노드 ID", placeholder="예: conv1")
+        ntype = st.selectbox("노드 타입", list(NODE_SPECS.keys()), index=0)
+        params_spec = NODE_SPECS[ntype]["params"]
+        params = {}
+        for k, spec in params_spec.items():
+            if spec == int:
+                params[k] = st.number_input(k, value=1, step=1)
+            elif spec == float:
+                params[k] = st.number_input(k, value=0.5, step=0.1, format="%.4f")
+            elif spec == bool:
+                params[k] = st.checkbox(k, value=False)
+            elif spec == "same_or_int":
+                mode = st.selectbox(k, ["same", "int"], index=0)
+                params[k] = "same" if mode == "same" else int(st.number_input(f"{k} (int)", value=1, step=1))
+            elif isinstance(spec, tuple):
+                typ, default = spec
+                if typ == int:
+                    val = st.number_input(k, value=default if default is not None else 0, step=1)
+                    params[k] = int(val) if default is not None else (None if val==0 else int(val))
+                elif typ == float:
+                    params[k] = float(st.number_input(k, value=float(default)))
+                elif typ == bool:
+                    params[k] = st.checkbox(k, value=bool(default))
+                else:
+                    params[k] = default
+            elif isinstance(spec, list):  # enum
+                default = NODE_SPECS[ntype]["params"][k][1] if isinstance(NODE_SPECS[ntype]["params"][k], tuple) else spec[0]
+                params[k] = st.selectbox(k, spec, index=spec.index(default) if default in spec else 0)
             else:
-                params[k] = default
-        elif isinstance(spec, list):  # enum
-            default = NODE_SPECS[ntype]["params"][k][1] if isinstance(NODE_SPECS[ntype]["params"][k], tuple) else spec[0]
-            params[k] = st.selectbox(k, spec, index=spec.index(default) if default in spec else 0)
-        else:
-            params[k] = st.text_input(k, value=str(spec))
-    add = st.form_submit_button("노드 추가")
-    if add:
-        assert nid, "노드 ID는 필수"
-        st.session_state.nodes.append({"id": nid, "type": ntype, "params": params})
-        st.rerun()
+                params[k] = st.text_input(k, value=str(spec))
+        add = st.form_submit_button("수동 추가")
+        if add:
+            assert nid, "노드 ID는 필수"
+            st.session_state.nodes.append({"id": nid, "type": ntype, "params": params})
+            st.rerun()
 
 # ---------- 사이드바: 엣지/입출력 ----------
 st.sidebar.subheader("Edges")
