@@ -236,6 +236,21 @@ def estimate_tensor_shape(node_id: str, node_type: str, params: dict, input_shap
     if node_type == "Input":
         return input_shape
     
+    elif node_type == "Conv1d":
+        B, C, T = input_shape
+        out_channels = params.get("out_channels", 64)
+        kernel_size = params.get("kernel_size", 3)
+        stride = params.get("stride", 1)
+        padding = params.get("padding", "same")
+        
+        if padding == "same":
+            pad = kernel_size // 2
+        else:
+            pad = int(padding)
+        
+        T_out = (T + 2 * pad - kernel_size) // stride + 1
+        return (B, out_channels, T_out)
+    
     elif node_type == "Conv2d":
         B, C, H, W = input_shape
         out_channels = params.get("out_channels", 64)
@@ -252,7 +267,24 @@ def estimate_tensor_shape(node_id: str, node_type: str, params: dict, input_shap
         W_out = (W + 2 * pad - kernel_size) // stride + 1
         return (B, out_channels, H_out, W_out)
     
+    elif node_type == "MaxPool1d":
+        B, C, T = input_shape
+        kernel_size = params.get("kernel_size", 2)
+        stride = params.get("stride", kernel_size)
+        
+        T_out = (T - kernel_size) // stride + 1
+        return (B, C, T_out)
+    
     elif node_type == "MaxPool2d":
+        B, C, H, W = input_shape
+        kernel_size = params.get("kernel_size", 2)
+        stride = params.get("stride", kernel_size)
+        
+        H_out = (H - kernel_size) // stride + 1
+        W_out = (W - kernel_size) // stride + 1
+        return (B, C, H_out, W_out)
+    
+    elif node_type == "AvgPool2d":
         B, C, H, W = input_shape
         kernel_size = params.get("kernel_size", 2)
         stride = params.get("stride", kernel_size)
@@ -264,24 +296,156 @@ def estimate_tensor_shape(node_id: str, node_type: str, params: dict, input_shap
     elif node_type == "ReLU":
         return input_shape  # 형태 유지
     
-    elif node_type == "LRN":
+    elif node_type == "Sigmoid":
+        return input_shape  # 형태 유지
+    
+    elif node_type == "Tanh":
+        return input_shape  # 형태 유지
+    
+    elif node_type == "Dropout":
+        return input_shape  # 형태 유지
+    
+    elif node_type == "BatchNorm1d":
+        return input_shape  # 형태 유지
+    
+    elif node_type == "BatchNorm2d":
         return input_shape  # 형태 유지
     
     elif node_type == "Flatten":
-        B, C, H, W = input_shape
-        return (B, C * H * W)
+        B = input_shape[0]
+        start_dim = params.get("start_dim", 1)
+        end_dim = params.get("end_dim", -1)
+        
+        if end_dim == -1:
+            end_dim = len(input_shape) - 1
+        
+        # Flatten 계산
+        flattened_size = 1
+        for i in range(start_dim, end_dim + 1):
+            if i < len(input_shape):
+                flattened_size *= input_shape[i]
+        
+        result_shape = list(input_shape[:start_dim]) + [flattened_size]
+        return tuple(result_shape)
     
     elif node_type == "Linear":
         B = input_shape[0]
         out_features = params.get("out_features", 1000)
         return (B, out_features)
     
+    elif node_type == "GRUBlock":
+        B, T, H = input_shape
+        hidden_size = params.get("hidden_size", 128)
+        bidirectional = params.get("bidirectional", True)
+        out_mode = params.get("out", "last")
+        
+        if bidirectional:
+            hidden_size *= 2
+        
+        if out_mode == "seq":
+            return (B, T, hidden_size)
+        else:
+            return (B, hidden_size)
+    
+    elif node_type == "SEBlock":
+        return input_shape  # 형태 유지
+    
+    elif node_type == "ResidualBlock":
+        B, C, H, W = input_shape
+        out_channels = params.get("out_channels", C)
+        return (B, out_channels, H, W)
+    
+    elif node_type == "VGGBlock":
+        B, C, H, W = input_shape
+        c2 = params.get("c2", C)
+        pool = params.get("pool", True)
+        
+        if pool:
+            H = H // 2
+            W = W // 2
+        
+        return (B, c2, H, W)
+    
     # 기본적으로 입력 형태 유지
     return input_shape
 
+# ---------- 모델 통계 계산 함수 ----------
+def calculate_model_statistics(nodes: List[dict], edges: List[List[str]], tensor_shapes: Dict[str, tuple]) -> dict:
+    """모델의 통계 정보 계산"""
+    stats = {
+        "total_layers": len(nodes),
+        "total_connections": len(edges),
+        "estimated_params": 0,
+        "estimated_memory_mb": 0,
+        "input_shapes": [],
+        "output_shapes": [],
+        "layer_types": {},
+        "compatibility_issues": []
+    }
+    
+    # 레이어 타입별 카운트
+    for node in nodes:
+        node_type = node["type"]
+        stats["layer_types"][node_type] = stats["layer_types"].get(node_type, 0) + 1
+    
+    # 파라미터 수 추정
+    for node in nodes:
+        node_type = node["type"]
+        params = node.get("params", {})
+        
+        if node_type == "Conv1d":
+            out_channels = params.get("out_channels", 64)
+            kernel_size = params.get("kernel_size", 3)
+            # 입력 채널은 이전 레이어에서 추정
+            in_channels = 3  # 기본값
+            stats["estimated_params"] += in_channels * out_channels * kernel_size + out_channels
+        
+        elif node_type == "Conv2d":
+            out_channels = params.get("out_channels", 64)
+            kernel_size = params.get("kernel_size", 3)
+            in_channels = 3  # 기본값
+            stats["estimated_params"] += in_channels * out_channels * kernel_size * kernel_size + out_channels
+        
+        elif node_type == "Linear":
+            out_features = params.get("out_features", 1000)
+            in_features = 512  # 기본값
+            stats["estimated_params"] += in_features * out_features + out_features
+        
+        elif node_type == "BatchNorm1d":
+            stats["estimated_params"] += 64 * 2  # weight + bias
+        
+        elif node_type == "BatchNorm2d":
+            stats["estimated_params"] += 64 * 2  # weight + bias
+    
+    # 메모리 사용량 추정 (MB)
+    stats["estimated_memory_mb"] = stats["estimated_params"] * 4 / (1024 * 1024)  # float32 기준
+    
+    # 호환성 검사
+    for edge in edges:
+        src, dst = edge
+        src_node = next((n for n in nodes if n["id"] == src), None)
+        dst_node = next((n for n in nodes if n["id"] == dst), None)
+        
+        if src_node and dst_node:
+            src_type = src_node["type"]
+            dst_type = dst_node["type"]
+            
+            # 텐서 형태 호환성 검사
+            if src in tensor_shapes and dst in tensor_shapes:
+                src_shape = tensor_shapes[src]
+                dst_shape = tensor_shapes[dst]
+                
+                # 간단한 호환성 검사
+                if len(src_shape) != len(dst_shape):
+                    stats["compatibility_issues"].append(
+                        f"형태 불일치: {src}({src_shape}) → {dst}({dst_shape})"
+                    )
+    
+    return stats
+
 # ---------- 개선된 시각적 네트워크 다이어그램 생성 ----------
 def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_shapes: Dict[str, tuple]) -> str:
-    """HTML/CSS로 네트워크 다이어그램 생성"""
+    """HTML/CSS로 네트워크 다이어그램 생성 (드래그 앤 드롭 연결 기능 포함)"""
     
     # 의미없는 연결 필터링 (Input → Output, 같은 타입 간 연결 등)
     def is_meaningful_edge(src_id: str, dst_id: str) -> bool:
@@ -334,10 +498,24 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
         display: flex;
         flex-direction: column;
         justify-content: center;
+        cursor: pointer;
+        user-select: none;
     }
     .layer:hover {
         transform: translateY(-2px);
         box-shadow: 0 12px 35px rgba(0,0,0,0.2);
+    }
+    .layer.dragging {
+        opacity: 0.7;
+        transform: scale(1.05);
+    }
+    .layer.connection-source {
+        border: 3px solid #28a745;
+        box-shadow: 0 0 20px rgba(40, 167, 69, 0.5);
+    }
+    .layer.connection-target {
+        border: 3px solid #007bff;
+        box-shadow: 0 0 20px rgba(0, 123, 255, 0.5);
     }
     .layer-header {
         display: flex;
@@ -449,8 +627,35 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
         position: relative;
         z-index: 2;
     }
+    .connection-instructions {
+        background: rgba(255, 255, 255, 0.95);
+        border-radius: 8px;
+        padding: 15px;
+        margin: 20px 0;
+        text-align: center;
+        border: 2px dashed #667eea;
+    }
+    .connection-instructions h4 {
+        color: #667eea;
+        margin: 0 0 10px 0;
+    }
+    .connection-instructions p {
+        margin: 5px 0;
+        font-size: 14px;
+        color: #6c757d;
+    }
     </style>
     <div class="network-container">
+    """
+    
+    # 연결 안내 메시지
+    html += """
+    <div class="connection-instructions">
+        <h4>🔗 연결 방법</h4>
+        <p>1. 레이어를 클릭하여 연결 시작점 선택</p>
+        <p>2. 다른 레이어를 클릭하여 연결 완료</p>
+        <p>3. ESC 키로 연결 취소</p>
+    </div>
     """
     
     # 연결 정보 표시
@@ -541,7 +746,7 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
         node_positions[node_id] = (x_pos, y_pos)
         
         html += f"""
-        <div class="layer" style="border-left-color: {category_color};" data-node-id="{node_id}">
+        <div class="layer" style="border-left-color: {category_color};" data-node-id="{node_id}" onclick="handleLayerClick('{node_id}')">
             <div class="category-badge" style="background-color: {category_color};">{category_name}</div>
             <div class="status-check">✓</div>
             <div class="layer-header">
@@ -571,7 +776,74 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
                   marker-end="url(#arrowhead)" />
             '''
     
-    html += "</svg></div></div>"
+    html += "</svg></div>"
+    
+    # JavaScript for drag and drop connections
+    html += """
+    <script>
+    let connectionSource = null;
+    let connectionTarget = null;
+    
+    function handleLayerClick(nodeId) {
+        if (!connectionSource) {
+            // Start connection
+            connectionSource = nodeId;
+            document.querySelector(`[data-node-id="${nodeId}"]`).classList.add('connection-source');
+            console.log('Connection started from:', nodeId);
+        } else if (connectionSource === nodeId) {
+            // Cancel connection if clicking same node
+            cancelConnection();
+        } else {
+            // Complete connection
+            connectionTarget = nodeId;
+            document.querySelector(`[data-node-id="${nodeId}"]`).classList.add('connection-target');
+            
+            // Send connection to Streamlit
+            if (window.parent && window.parent.postMessage) {
+                window.parent.postMessage({
+                    type: 'add_connection',
+                    source: connectionSource,
+                    target: connectionTarget
+                }, '*');
+            }
+            
+            // Visual feedback
+            setTimeout(() => {
+                cancelConnection();
+                // Trigger page reload to show new connection
+                window.location.reload();
+            }, 500);
+        }
+    }
+    
+    function cancelConnection() {
+        if (connectionSource) {
+            document.querySelector(`[data-node-id="${connectionSource}"]`).classList.remove('connection-source');
+        }
+        if (connectionTarget) {
+            document.querySelector(`[data-node-id="${connectionTarget}"]`).classList.remove('connection-target');
+        }
+        connectionSource = null;
+        connectionTarget = null;
+    }
+    
+    // ESC key to cancel connection
+    document.addEventListener('keydown', function(event) {
+        if (event.key === 'Escape') {
+            cancelConnection();
+        }
+    });
+    
+    // Click outside to cancel connection
+    document.addEventListener('click', function(event) {
+        if (!event.target.closest('.layer') && connectionSource) {
+            cancelConnection();
+        }
+    });
+    </script>
+    """
+    
+    html += "</div>"
     return html
 
 # ---------- 코드 생성기 ----------
@@ -1064,16 +1336,37 @@ with tab1:
     if st.session_state.nodes:
         st.subheader("🔍 네트워크 아키텍처 시각화")
         
+        # 모델 통계 계산
+        model_stats = calculate_model_statistics(
+            st.session_state.nodes, 
+            st.session_state.edges, 
+            st.session_state.tensor_shapes
+        )
+        
         # 네트워크 통계 표시
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("총 레이어", len(st.session_state.nodes))
+            st.metric("총 레이어", model_stats["total_layers"])
         with col2:
-            st.metric("연결 수", len(st.session_state.edges))
+            st.metric("연결 수", model_stats["total_connections"])
         with col3:
-            st.metric("입력", len(st.session_state.inputs))
+            st.metric("추정 파라미터", f"{model_stats['estimated_params']:,}")
         with col4:
-            st.metric("출력", len(st.session_state.outputs))
+            st.metric("메모리 사용량", f"{model_stats['estimated_memory_mb']:.1f}MB")
+        
+        # 레이어 타입별 통계
+        if model_stats["layer_types"]:
+            st.subheader("📊 레이어 타입별 통계")
+            layer_cols = st.columns(min(4, len(model_stats["layer_types"])))
+            for i, (layer_type, count) in enumerate(model_stats["layer_types"].items()):
+                with layer_cols[i % 4]:
+                    st.metric(layer_type, count)
+        
+        # 호환성 문제 표시
+        if model_stats["compatibility_issues"]:
+            st.subheader("⚠️ 호환성 문제")
+            for issue in model_stats["compatibility_issues"]:
+                st.error(issue)
         
         # 더 큰 다이어그램 (개선된 버전 사용)
         diagram_html = create_network_diagram(
@@ -1102,6 +1395,72 @@ with tab1:
                 idx = st.number_input("삭제할 엣지 index", min_value=0, max_value=max(0,len(st.session_state.edges)-1), value=0, step=1)
                 if st.button("엣지 삭제"):
                     st.session_state.edges.pop(idx)
+                    st.rerun()
+        
+        # 자동 연결 기능
+        st.subheader("🔗 자동 연결 도구")
+        colC, colD = st.columns(2)
+        
+        with colC:
+            if len(st.session_state.nodes) >= 2:
+                if st.button("🔄 순차 연결"):
+                    # 모든 노드를 순서대로 연결
+                    nodes = st.session_state.nodes
+                    new_edges = []
+                    for i in range(len(nodes) - 1):
+                        new_edges.append([nodes[i]["id"], nodes[i + 1]["id"]])
+                    
+                    # 기존 엣지와 중복 제거
+                    existing_edges = set(tuple(edge) for edge in st.session_state.edges)
+                    for edge in new_edges:
+                        if tuple(edge) not in existing_edges:
+                            st.session_state.edges.append(edge)
+                    
+                    st.success(f"{len(new_edges)}개의 순차 연결이 추가되었습니다!")
+                    st.rerun()
+        
+        with colD:
+            if len(st.session_state.nodes) >= 2:
+                if st.button("🎯 스마트 연결"):
+                    # 타입별로 적절한 연결 생성
+                    nodes = st.session_state.nodes
+                    new_edges = []
+                    
+                    # Input → Conv → Norm → Activation → Pool → Linear → Output 패턴
+                    type_order = ["Input", "Conv1d", "Conv2d", "BatchNorm1d", "BatchNorm2d", 
+                                 "ReLU", "Sigmoid", "Tanh", "MaxPool1d", "MaxPool2d", 
+                                 "AvgPool2d", "Flatten", "Linear", "Dropout", "Output"]
+                    
+                    # 타입별로 노드 그룹화
+                    nodes_by_type = {}
+                    for node in nodes:
+                        node_type = node["type"]
+                        if node_type not in nodes_by_type:
+                            nodes_by_type[node_type] = []
+                        nodes_by_type[node_type].append(node)
+                    
+                    # 순서대로 연결
+                    prev_nodes = []
+                    for target_type in type_order:
+                        if target_type in nodes_by_type:
+                            current_nodes = nodes_by_type[target_type]
+                            
+                            # 이전 노드들과 연결
+                            for prev_node in prev_nodes:
+                                for current_node in current_nodes:
+                                    new_edges.append([prev_node["id"], current_node["id"]])
+                            
+                            prev_nodes = current_nodes
+                    
+                    # 기존 엣지와 중복 제거
+                    existing_edges = set(tuple(edge) for edge in st.session_state.edges)
+                    added_count = 0
+                    for edge in new_edges:
+                        if tuple(edge) not in existing_edges:
+                            st.session_state.edges.append(edge)
+                            added_count += 1
+                    
+                    st.success(f"{added_count}개의 스마트 연결이 추가되었습니다!")
                     st.rerun()
     else:
         st.info("노드를 추가하여 네트워크를 구성하세요.")
@@ -1272,10 +1631,78 @@ with tab4:
             st.success("ResNet-18 템플릿이 로드되었습니다!")
             st.rerun()
     
+    # 추가 템플릿들
+    col3, col4 = st.columns(2)
+    
+    with col3:
+        if st.button("🏗️ LSTM 텍스트 분류 템플릿 로드"):
+            lstm_template = {
+                "version": "0.2",
+                "metadata": {"name": "lstm_text_classifier"},
+                "nodes": [
+                    {"id": "inp", "type": "Input", "params": {}},
+                    {"id": "permute1", "type": "Permute_BCT_to_BTH", "params": {}},
+                    {"id": "lstm1", "type": "GRUBlock", "params": {"hidden_size": 128, "num_layers": 2, "bidirectional": True, "out": "last"}},
+                    {"id": "dropout1", "type": "Dropout", "params": {"p": 0.5}},
+                    {"id": "fc1", "type": "Linear", "params": {"out_features": 64, "bias": True}},
+                    {"id": "relu1", "type": "ReLU", "params": {}},
+                    {"id": "dropout2", "type": "Dropout", "params": {"p": 0.3}},
+                    {"id": "fc2", "type": "Linear", "params": {"out_features": 10, "bias": True}},
+                ],
+                "edges": [
+                    ["inp", "permute1"], ["permute1", "lstm1"], ["lstm1", "dropout1"],
+                    ["dropout1", "fc1"], ["fc1", "relu1"], ["relu1", "dropout2"], ["dropout2", "fc2"]
+                ],
+                "inputs": ["inp"],
+                "outputs": ["fc2"]
+            }
+            st.session_state.nodes = lstm_template["nodes"]
+            st.session_state.edges = lstm_template["edges"]
+            st.session_state.inputs = lstm_template["inputs"]
+            st.session_state.outputs = lstm_template["outputs"]
+            st.session_state.tensor_shapes.clear()
+            st.success("LSTM 텍스트 분류 템플릿이 로드되었습니다!")
+            st.rerun()
+    
+    with col4:
+        if st.button("🏗️ SE-ResNet 템플릿 로드"):
+            se_resnet_template = {
+                "version": "0.2",
+                "metadata": {"name": "se_resnet_template"},
+                "nodes": [
+                    {"id": "inp", "type": "Input", "params": {}},
+                    {"id": "conv1", "type": "Conv2d", "params": {"out_channels": 64, "kernel_size": 7, "stride": 2, "padding": "same"}},
+                    {"id": "bn1", "type": "BatchNorm2d", "params": {"num_features": 0}},
+                    {"id": "relu1", "type": "ReLU", "params": {}},
+                    {"id": "pool1", "type": "MaxPool2d", "params": {"kernel_size": 3, "stride": 2}},
+                    {"id": "res1", "type": "ResidualBlock", "params": {"out_channels": 64, "kernel_size": 3, "stride": 1}},
+                    {"id": "se1", "type": "SEBlock", "params": {"reduction": 16}},
+                    {"id": "res2", "type": "ResidualBlock", "params": {"out_channels": 128, "kernel_size": 3, "stride": 2}},
+                    {"id": "se2", "type": "SEBlock", "params": {"reduction": 16}},
+                    {"id": "gap", "type": "MaxPool2d", "params": {"kernel_size": 7, "stride": 1}},
+                    {"id": "flat", "type": "Flatten", "params": {"start_dim": 1, "end_dim": -1}},
+                    {"id": "fc", "type": "Linear", "params": {"out_features": 1000, "bias": True}},
+                ],
+                "edges": [
+                    ["inp", "conv1"], ["conv1", "bn1"], ["bn1", "relu1"], ["relu1", "pool1"],
+                    ["pool1", "res1"], ["res1", "se1"], ["se1", "res2"], ["res2", "se2"],
+                    ["se2", "gap"], ["gap", "flat"], ["flat", "fc"]
+                ],
+                "inputs": ["inp"],
+                "outputs": ["fc"]
+            }
+            st.session_state.nodes = se_resnet_template["nodes"]
+            st.session_state.edges = se_resnet_template["edges"]
+            st.session_state.inputs = se_resnet_template["inputs"]
+            st.session_state.outputs = se_resnet_template["outputs"]
+            st.session_state.tensor_shapes.clear()
+            st.success("SE-ResNet 템플릿이 로드되었습니다!")
+            st.rerun()
+    
     st.divider()
     st.subheader("📚 템플릿 설명")
     
-    col1, col2 = st.columns(2)
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.markdown("""
         **VGG-16**
@@ -1290,4 +1717,20 @@ with tab4:
         - 잔차 연결을 사용한 18층 네트워크
         - 그래디언트 소실 문제 해결
         - 효율적인 학습 가능
+        """)
+    
+    with col3:
+        st.markdown("""
+        **LSTM 텍스트 분류**
+        - GRU 기반 순환 신경망
+        - 텍스트 분류에 특화
+        - 양방향 처리 지원
+        """)
+    
+    with col4:
+        st.markdown("""
+        **SE-ResNet**
+        - Squeeze-and-Excitation 블록 포함
+        - 채널 어텐션 메커니즘
+        - 향상된 특징 표현
         """)
