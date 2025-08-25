@@ -279,9 +279,29 @@ def estimate_tensor_shape(node_id: str, node_type: str, params: dict, input_shap
     # 기본적으로 입력 형태 유지
     return input_shape
 
-# ---------- 시각적 네트워크 다이어그램 생성 ----------
+# ---------- 개선된 시각적 네트워크 다이어그램 생성 ----------
 def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_shapes: Dict[str, tuple]) -> str:
     """HTML/CSS로 네트워크 다이어그램 생성"""
+    
+    # 의미없는 연결 필터링 (Input → Output, 같은 타입 간 연결 등)
+    def is_meaningful_edge(src_id: str, dst_id: str) -> bool:
+        src_node = next((n for n in nodes if n["id"] == src_id), None)
+        dst_node = next((n for n in nodes if n["id"] == dst_id), None)
+        
+        if not src_node or not dst_node:
+            return False
+        
+        # Input → Output 연결 제외
+        if src_node["type"] == "Input" and dst_node["type"] == "Output":
+            return False
+        
+        # 같은 타입 간 직접 연결 제외 (예: Conv1d → Conv1d)
+        if src_node["type"] == dst_node["type"] and src_node["type"] in ["Conv1d", "Conv2d", "BatchNorm1d", "BatchNorm2d"]:
+            return False
+        
+        return True
+    
+    filtered_edges = [edge for edge in edges if is_meaningful_edge(edge[0], edge[1])]
     
     html = """
     <style>
@@ -293,16 +313,27 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
         margin: 10px 0;
         box-shadow: 0 10px 30px rgba(0,0,0,0.2);
     }
+    .layers-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 20px;
+        margin: 20px 0;
+        position: relative;
+        min-height: 400px;
+    }
     .layer {
         background: white;
         border-radius: 12px;
         padding: 20px;
-        margin: 15px 0;
         text-align: center;
         position: relative;
         box-shadow: 0 8px 25px rgba(0,0,0,0.15);
         transition: all 0.3s ease;
         border-left: 5px solid;
+        min-height: 150px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
     }
     .layer:hover {
         transform: translateY(-2px);
@@ -353,13 +384,6 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
         justify-content: center;
         box-shadow: 0 2px 8px rgba(40, 167, 69, 0.3);
     }
-    .arrow {
-        text-align: center;
-        font-size: 24px;
-        color: white;
-        margin: 10px 0;
-        text-shadow: 0 2px 4px rgba(0,0,0,0.3);
-    }
     .params {
         font-size: 12px;
         color: #6c757d;
@@ -380,34 +404,104 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
         font-weight: bold;
         text-transform: uppercase;
     }
+    .connection-info {
+        background: rgba(255, 255, 255, 0.9);
+        border-radius: 8px;
+        padding: 15px;
+        margin: 20px 0;
+        text-align: center;
+    }
+    .connection-count {
+        font-size: 18px;
+        font-weight: bold;
+        color: #667eea;
+    }
+    .connection-details {
+        font-size: 14px;
+        color: #6c757d;
+        margin-top: 5px;
+    }
+    .warning {
+        background: #fff3cd;
+        border: 1px solid #ffeaa7;
+        border-radius: 8px;
+        padding: 15px;
+        margin: 20px 0;
+        color: #856404;
+    }
+    .connection-lines {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        z-index: 1;
+    }
+    .connection-line {
+        stroke: #667eea;
+        stroke-width: 2;
+        fill: none;
+        opacity: 0.7;
+        marker-end: url(#arrowhead);
+    }
+    .layer {
+        position: relative;
+        z-index: 2;
+    }
     </style>
     <div class="network-container">
     """
     
-    # 노드들을 순서대로 정렬 (간단한 위상정렬)
-    node_order = []
-    in_edges = {n["id"]: [] for n in nodes}
-    for src, dst in edges:
-        in_edges[dst].append(src)
+    # 연결 정보 표시
+    meaningful_count = len(filtered_edges)
+    total_count = len(edges)
+    removed_count = total_count - meaningful_count
     
-    # 입력 노드부터 시작
-    for node in nodes:
-        if node["id"] in st.session_state.inputs:
-            node_order.append(node)
+    html += f"""
+    <div class="connection-info">
+        <div class="connection-count">🔗 연결 정보</div>
+        <div class="connection-details">
+            유효한 연결: {meaningful_count}개 | 
+            필터링된 연결: {removed_count}개 | 
+            총 연결: {total_count}개
+        </div>
+    </div>
+    """
     
-    # 나머지 노드들 추가 (간단한 방식)
-    for node in nodes:
-        if node not in node_order:
-            node_order.append(node)
+    if removed_count > 0:
+        html += f"""
+        <div class="warning">
+            ⚠️ {removed_count}개의 의미없는 연결이 자동으로 필터링되었습니다.
+            (Input→Output, 같은 타입 간 직접 연결 등)
+        </div>
+        """
     
-    for i, node in enumerate(node_order):
+    # 노드들을 그리드 형태로 배치
+    html += '<div class="layers-grid" style="position: relative;">'
+    
+    # SVG 연결선을 위한 컨테이너
+    html += '''
+    <svg class="connection-lines" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+            <marker id="arrowhead" markerWidth="10" markerHeight="7" 
+                    refX="9" refY="3.5" orient="auto">
+                <polygon points="0 0, 10 3.5, 0 7" fill="#667eea" />
+            </marker>
+        </defs>
+    '''
+    
+    # 노드 위치 추적을 위한 딕셔너리
+    node_positions = {}
+    
+    for i, node in enumerate(nodes):
         node_id = node["id"]
         node_type = node["type"]
         params = node.get("params", {})
         
         # 텐서 형태 가져오기
         input_shapes = []
-        for src, dst in edges:
+        for src, dst in filtered_edges:
             if dst == node_id and src in tensor_shapes:
                 input_shapes.append(tensor_shapes[src])
         
@@ -433,8 +527,21 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
         category_name = NODE_SPECS[node_type]["category"]
         icon = NODE_SPECS[node_type]["icon"]
         
+        # 연결 정보 추가
+        incoming = [src for src, dst in filtered_edges if dst == node_id]
+        outgoing = [dst for src, dst in filtered_edges if src == node_id]
+        connection_info = f"입력: {len(incoming)}개, 출력: {len(outgoing)}개"
+        
+        # 노드 위치 계산 (그리드 위치)
+        grid_col = i % 3  # 3열 그리드
+        grid_row = i // 3
+        x_pos = grid_col * 320 + 160  # 300px 너비 + 20px gap
+        y_pos = grid_row * 200 + 100  # 150px 높이 + 20px gap
+        
+        node_positions[node_id] = (x_pos, y_pos)
+        
         html += f"""
-        <div class="layer" style="border-left-color: {category_color};">
+        <div class="layer" style="border-left-color: {category_color};" data-node-id="{node_id}">
             <div class="category-badge" style="background-color: {category_color};">{category_name}</div>
             <div class="status-check">✓</div>
             <div class="layer-header">
@@ -443,14 +550,28 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
             </div>
             <div class="layer-id">ID: {node_id}</div>
             <div class="tensor-shape">[{', '.join(map(str, output_shape))}]</div>
+            <div class="connection-details" style="margin-top: 10px; font-size: 11px;">{connection_info}</div>
             {f'<div class="params">{param_str}</div>' if param_str else ''}
         </div>
         """
-        
-        if i < len(node_order) - 1:
-            html += '<div class="arrow">↓</div>'
     
-    html += "</div>"
+    # 연결선 그리기
+    for src, dst in filtered_edges:
+        if src in node_positions and dst in node_positions:
+            x1, y1 = node_positions[src]
+            x2, y2 = node_positions[dst]
+            
+            # 곡선 연결선 (베지어 곡선)
+            mid_x = (x1 + x2) / 2
+            mid_y = (y1 + y2) / 2
+            
+            html += f'''
+            <path class="connection-line" 
+                  d="M {x1} {y1} Q {mid_x} {y1} {mid_x} {mid_y} T {x2} {y2}"
+                  marker-end="url(#arrowhead)" />
+            '''
+    
+    html += "</svg></div></div>"
     return html
 
 # ---------- 코드 생성기 ----------
@@ -591,17 +712,17 @@ def export_graph_to_python(graph: dict, class_name: str="ExportedModel") -> str:
         fwd.append(f"return {{ {pairs} }}")
     fwd_body = "\n        ".join(fwd)
 
-    header = """# Auto-generated by TorchCanvas Code Export
+    header = '''# Auto-generated by TorchCanvas Code Export
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 class GRUBlock(nn.Module):
-    \"\"\"
+    """
     GRU + output normalization
     - input: (B, T, H_in)
     - out: 'last' | 'mean' | 'max' | 'seq'
-    \"\"\"
+    """
     def __init__(self, hidden_size:int, num_layers:int=1, bidirectional:bool=True, out:str="last"):
         super().__init__()
         self.hidden_size = hidden_size
@@ -633,11 +754,11 @@ class GRUBlock(nn.Module):
         raise ValueError(f"Unknown out mode: {self.out_mode}")
 
 class SEBlock(nn.Module):
-    \"\"\"
+    """
     Squeeze-and-Excitation Block
     - input: (B, C, H, W) or (B, C, T)
     - reduction: channel reduction ratio
-    \"\"\"
+    """
     def __init__(self, reduction: int = 8):
         super().__init__()
         self.reduction = reduction
@@ -674,11 +795,11 @@ class SEBlock(nn.Module):
             return x * y.unsqueeze(-1)
 
 class ResidualBlock(nn.Module):
-    \"\"\"
+    """
     Residual Block with optional projection
     - input: (B, C, H, W) or (B, C, T)
     - out_channels: output channels (if different from input, uses 1x1 projection)
-    \"\"\"
+    """
     def __init__(self, out_channels: int, kernel_size: int = 3, stride: int = 1):
         super().__init__()
         self.out_channels = out_channels
@@ -731,11 +852,11 @@ class ResidualBlock(nn.Module):
         return out
 
 class VGGBlock(nn.Module):
-    \"\"\"
+    """
     VGG-style block: Conv-ReLU-Conv-ReLU-(Pool)
     - input: (B, C, H, W) or (B, C, T)
     - c1, c2: channel counts for two conv layers
-    \"\"\"
+    """
     def __init__(self, c1: int, c2: int, kernel_size: int = 3, use_lrn: bool = False, pool: bool = True):
         super().__init__()
         self.c1 = c1
@@ -780,7 +901,7 @@ class VGGBlock(nn.Module):
             x = self.pool_layer(x)
         
         return x
-"""
+'''
     cls = f"""
 class {class_name}(nn.Module):
     def __init__(self):
@@ -795,7 +916,7 @@ if __name__ == "__main__":
     # quick smoke test
     model = ExportedModel()
     x = torch.randn(4, 3, 224, 224)  # (B,C,H,W) for 2D or (B,C,T) for 1D
-    out = model({{"inp": x}})
+    out = model({"inp": x})
     print("out.shape =", out.shape)
 """
     return header + cls + main
@@ -932,128 +1053,6 @@ if st.sidebar.button("그래프 초기화"):
     st.session_state.tensor_shapes.clear()
     st.rerun()
 
-# ---------- 시각적 네트워크 다이어그램 생성 ----------
-def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_shapes: Dict[str, tuple]) -> str:
-    """HTML/CSS로 네트워크 다이어그램 생성"""
-    
-    html = """
-    <style>
-    .network-container {
-        font-family: 'Courier New', monospace;
-        background: #f8f9fa;
-        padding: 20px;
-        border-radius: 10px;
-        margin: 10px 0;
-    }
-    .layer {
-        background: white;
-        border: 2px solid #007bff;
-        border-radius: 8px;
-        padding: 15px;
-        margin: 10px 0;
-        text-align: center;
-        position: relative;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-    .layer-name {
-        font-weight: bold;
-        color: #007bff;
-        margin-bottom: 5px;
-    }
-    .tensor-shape {
-        font-family: 'Courier New', monospace;
-        background: #e9ecef;
-        padding: 5px 10px;
-        border-radius: 4px;
-        margin: 5px 0;
-        font-size: 12px;
-    }
-    .status-check {
-        position: absolute;
-        top: 10px;
-        right: 10px;
-        color: #28a745;
-        font-size: 18px;
-    }
-    .arrow {
-        text-align: center;
-        font-size: 20px;
-        color: #6c757d;
-        margin: 5px 0;
-    }
-    .params {
-        font-size: 11px;
-        color: #6c757d;
-        margin-top: 5px;
-    }
-    </style>
-    <div class="network-container">
-    """
-    
-    # 노드들을 순서대로 정렬 (간단한 위상정렬)
-    node_order = []
-    in_edges = {n["id"]: [] for n in nodes}
-    for src, dst in edges:
-        in_edges[dst].append(src)
-    
-    # 입력 노드부터 시작
-    for node in nodes:
-        if node["id"] in st.session_state.inputs:
-            node_order.append(node)
-    
-    # 나머지 노드들 추가 (간단한 방식)
-    for node in nodes:
-        if node not in node_order:
-            node_order.append(node)
-    
-    for i, node in enumerate(node_order):
-        node_id = node["id"]
-        node_type = node["type"]
-        params = node.get("params", {})
-        
-        # 텐서 형태 가져오기
-        input_shapes = []
-        for src, dst in edges:
-            if dst == node_id and src in tensor_shapes:
-                input_shapes.append(tensor_shapes[src])
-        
-        if node_id in tensor_shapes:
-            output_shape = tensor_shapes[node_id]
-        else:
-            # 간단한 형태 추정
-            if not input_shapes:
-                output_shape = (1, 3, 224, 224)
-            else:
-                output_shape = input_shapes[0]  # 기본적으로 입력 형태 유지
-            st.session_state.tensor_shapes[node_id] = output_shape
-        
-        # 파라미터 문자열 생성
-        param_str = ""
-        if params:
-            param_items = []
-            for k, v in params.items():
-                if isinstance(v, (int, float, bool)):
-                    param_items.append(f"{k}={v}")
-                elif isinstance(v, str):
-                    param_items.append(f"{k}='{v}'")
-            param_items = param_items[:3]  # 최대 3개만 표시
-            param_str = ", ".join(param_items)
-        
-        html += f"""
-        <div class="layer">
-            <div class="status-check">✓</div>
-            <div class="layer-name">{node_type}</div>
-            <div class="tensor-shape">[{', '.join(map(str, output_shape))}]</div>
-            {f'<div class="params">{param_str}</div>' if param_str else ''}
-        </div>
-        """
-        
-        if i < len(node_order) - 1:
-            html += '<div class="arrow">↓</div>'
-    
-    html += "</div>"
-    return html
-
 # ---------- 메인: 탭 기반 인터페이스 ----------
 st.title("TorchCanvas — 시각적 신경망 디자이너")
 
@@ -1076,7 +1075,7 @@ with tab1:
         with col4:
             st.metric("출력", len(st.session_state.outputs))
         
-        # 더 큰 다이어그램
+        # 더 큰 다이어그램 (개선된 버전 사용)
         diagram_html = create_network_diagram(
             st.session_state.nodes, 
             st.session_state.edges, 
@@ -1106,7 +1105,7 @@ with tab1:
                     st.rerun()
     else:
         st.info("노드를 추가하여 네트워크를 구성하세요.")
-        st.image("https://via.placeholder.com/800x400/667eea/ffffff?text=TorchCanvas+Network+Designer", use_column_width=True)
+        st.image("https://via.placeholder.com/800x400/667eea/ffffff?text=TorchCanvas+Network+Designer", use_container_width=True)
 
 with tab2:
     # 코드 생성 및 다운로드
@@ -1292,5 +1291,3 @@ with tab4:
         - 그래디언트 소실 문제 해결
         - 효율적인 학습 가능
         """)
-
-
