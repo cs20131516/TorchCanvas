@@ -11,17 +11,29 @@ st.set_page_config(page_title="TorchCanvas — Code Preview", layout="wide")
 NODE_SPECS = {
     "Input": {"params": {}},
     "Conv1d": {"params": {"out_channels": int, "kernel_size": int, "stride": (int, 1), "padding": ("same_or_int", "same")}},
+    "Conv2d": {"params": {"out_channels": int, "kernel_size": int, "stride": (int, 1), "padding": ("same_or_int", "same")}},
     "BatchNorm1d": {"params": {"num_features": (int, 0)}},  # 0 → LazyBatchNorm1d
+    "BatchNorm2d": {"params": {"num_features": (int, 0)}},  # 0 → LazyBatchNorm2d
     "Linear": {"params": {"out_features": int, "bias": (bool, True)}},
     "ReLU": {"params": {}},
     "Dropout": {"params": {"p": (float, 0.5)}},
     "MaxPool1d": {"params": {"kernel_size": (int, 2), "stride": (int, None)}},
+    "MaxPool2d": {"params": {"kernel_size": (int, 2), "stride": (int, None)}},
     "Concat": {"params": {"dim": (int, 1)}},
+    "Add": {"params": {}},
+    "Flatten": {"params": {"start_dim": (int, 1), "end_dim": (int, -1)}},
     "Permute_BCT_to_BTH": {"params": {}},
     "Permute_BTH_to_BCT": {"params": {}},
     "GRUBlock": {"params": {
         "hidden_size": int, "num_layers": (int, 1), "bidirectional": (bool, True),
         "out": (["last","mean","max","seq"], "last")
+    }},
+    # 컴포지트 블록들
+    "SEBlock": {"params": {"reduction": (int, 8)}},
+    "ResidualBlock": {"params": {"out_channels": int, "kernel_size": (int, 3), "stride": (int, 1)}},
+    "VGGBlock": {"params": {
+        "c1": int, "c2": int, "kernel_size": (int, 3), 
+        "use_lrn": (bool, False), "pool": (bool, True)
     }},
 }
 
@@ -74,12 +86,24 @@ def export_graph_to_python(graph: dict, class_name: str="ExportedModel") -> str:
             init_lines.append(
                 f"self.{nid} = nn.LazyConv1d({p['out_channels']}, {p['kernel_size']}, stride={p.get('stride',1)}, padding={pad_expr}, bias=True)"
             )
+        elif typ == "Conv2d":
+            pad = p.get("padding", "same")
+            pad_expr = f"{p.get('kernel_size')} // 2" if pad == "same" else str(int(pad))
+            init_lines.append(
+                f"self.{nid} = nn.LazyConv2d({p['out_channels']}, {p['kernel_size']}, stride={p.get('stride',1)}, padding={pad_expr}, bias=True)"
+            )
         elif typ == "BatchNorm1d":
             num = p.get("num_features", 0)
             if num in (None, 0):
                 init_lines.append(f"self.{nid} = nn.LazyBatchNorm1d()")
             else:
                 init_lines.append(f"self.{nid} = nn.BatchNorm1d({num})")
+        elif typ == "BatchNorm2d":
+            num = p.get("num_features", 0)
+            if num in (None, 0):
+                init_lines.append(f"self.{nid} = nn.LazyBatchNorm2d()")
+            else:
+                init_lines.append(f"self.{nid} = nn.BatchNorm2d({num})")
         elif typ == "Linear":
             init_lines.append(f"self.{nid} = nn.LazyLinear({p['out_features']}, bias={p.get('bias', True)})")
         elif typ == "ReLU":
@@ -91,11 +115,32 @@ def export_graph_to_python(graph: dict, class_name: str="ExportedModel") -> str:
             args = [f"kernel_size={ks}"]; 
             if stv is not None: args.append(f"stride={stv}")
             init_lines.append(f"self.{nid} = nn.MaxPool1d({', '.join(args)})")
+        elif typ == "MaxPool2d":
+            ks = p.get("kernel_size", 2); stv = p.get("stride", None)
+            args = [f"kernel_size={ks}"]; 
+            if stv is not None: args.append(f"stride={stv}")
+            init_lines.append(f"self.{nid} = nn.MaxPool2d({', '.join(args)})")
+        elif typ == "Flatten":
+            start_dim = p.get("start_dim", 1)
+            end_dim = p.get("end_dim", -1)
+            init_lines.append(f"self.{nid} = nn.Flatten(start_dim={start_dim}, end_dim={end_dim})")
         elif typ == "GRUBlock":
             hs = p["hidden_size"]; nl = p.get("num_layers", 1); bd = p.get("bidirectional", True)
             outm = repr(p.get("out", "last"))
             init_lines.append(f"self.{nid} = GRUBlock(hidden_size={hs}, num_layers={nl}, bidirectional={bd}, out={outm})")
-        elif typ in ("Concat","Permute_BCT_to_BTH","Permute_BTH_to_BCT"):
+        elif typ == "SEBlock":
+            reduction = p.get("reduction", 8)
+            init_lines.append(f"self.{nid} = SEBlock(reduction={reduction})")
+        elif typ == "ResidualBlock":
+            out_channels = p["out_channels"]
+            kernel_size = p.get("kernel_size", 3)
+            stride = p.get("stride", 1)
+            init_lines.append(f"self.{nid} = ResidualBlock(out_channels={out_channels}, kernel_size={kernel_size}, stride={stride})")
+        elif typ == "VGGBlock":
+            c1 = p["c1"]; c2 = p["c2"]; k = p.get("kernel_size", 3)
+            use_lrn = p.get("use_lrn", False); pool = p.get("pool", True)
+            init_lines.append(f"self.{nid} = VGGBlock(c1={c1}, c2={c2}, kernel_size={k}, use_lrn={use_lrn}, pool={pool})")
+        elif typ in ("Concat","Add","Permute_BCT_to_BTH","Permute_BTH_to_BCT"):
             init_lines.append(f"# {typ} '{nid}' has no parameters")
         else:
             init_lines.append(f"# TODO: Unsupported node type '{typ}'")
@@ -116,11 +161,15 @@ def export_graph_to_python(graph: dict, class_name: str="ExportedModel") -> str:
             dim = node_params[nid].get("dim", 1)
             src_list = ", ".join([f"cache['{s}']" for s in srcs])
             fwd.append(f"cache['{nid}'] = torch.cat([{src_list}], dim={dim})")
+        elif typ == "Add":
+            if len(srcs) != 2:
+                raise ValueError(f"Add node '{nid}' requires exactly 2 inputs, got {len(srcs)}")
+            fwd.append(f"cache['{nid}'] = cache['{srcs[0]}'] + cache['{srcs[1]}']")
         elif typ == "Permute_BCT_to_BTH":
             fwd.append(f"cache['{nid}'] = cache['{srcs[0]}'].transpose(1, 2).contiguous()")
         elif typ == "Permute_BTH_to_BCT":
             fwd.append(f"cache['{nid}'] = cache['{srcs[0]}'].transpose(1, 2).contiguous()")
-        elif typ in ("Conv1d","BatchNorm1d","Linear","ReLU","Dropout","MaxPool1d","GRUBlock"):
+        elif typ in ("Conv1d","Conv2d","BatchNorm1d","BatchNorm2d","Linear","ReLU","Dropout","MaxPool1d","MaxPool2d","Flatten","GRUBlock","SEBlock","ResidualBlock","VGGBlock"):
             fwd.append(f"cache['{nid}'] = self.{nid}(cache['{srcs[0]}'])")
         else:
             fwd.append(f"# TODO: forward for '{typ}'")
@@ -134,6 +183,7 @@ def export_graph_to_python(graph: dict, class_name: str="ExportedModel") -> str:
     header = """# Auto-generated by TorchCanvas Code Export
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 class GRUBlock(nn.Module):
     \"\"\"
@@ -170,6 +220,155 @@ class GRUBlock(nn.Module):
         if self.out_mode == "max":
             return y.max(dim=1).values
         raise ValueError(f"Unknown out mode: {self.out_mode}")
+
+class SEBlock(nn.Module):
+    \"\"\"
+    Squeeze-and-Excitation Block
+    - input: (B, C, H, W) or (B, C, T)
+    - reduction: channel reduction ratio
+    \"\"\"
+    def __init__(self, reduction: int = 8):
+        super().__init__()
+        self.reduction = reduction
+        self.avg_pool = None
+        self.fc1 = None
+        self.fc2 = None
+        
+    def forward(self, x):
+        if self.avg_pool is None:
+            # Lazy initialization based on input shape
+            if x.ndim == 4:  # (B, C, H, W)
+                self.avg_pool = nn.AdaptiveAvgPool2d(1)
+            else:  # (B, C, T)
+                self.avg_pool = nn.AdaptiveAvgPool1d(1)
+            
+            channels = x.size(1)
+            self.fc1 = nn.Linear(channels, channels // self.reduction).to(x.device, x.dtype)
+            self.fc2 = nn.Linear(channels // self.reduction, channels).to(x.device, x.dtype)
+        
+        # Squeeze
+        if x.ndim == 4:
+            y = self.avg_pool(x).squeeze(-1).squeeze(-1)  # (B, C)
+        else:
+            y = self.avg_pool(x).squeeze(-1)  # (B, C)
+        
+        # Excitation
+        y = F.relu(self.fc1(y))
+        y = torch.sigmoid(self.fc2(y))
+        
+        # Scale
+        if x.ndim == 4:
+            return x * y.unsqueeze(-1).unsqueeze(-1)
+        else:
+            return x * y.unsqueeze(-1)
+
+class ResidualBlock(nn.Module):
+    \"\"\"
+    Residual Block with optional projection
+    - input: (B, C, H, W) or (B, C, T)
+    - out_channels: output channels (if different from input, uses 1x1 projection)
+    \"\"\"
+    def __init__(self, out_channels: int, kernel_size: int = 3, stride: int = 1):
+        super().__init__()
+        self.out_channels = out_channels
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.conv1 = None
+        self.bn1 = None
+        self.conv2 = None
+        self.bn2 = None
+        self.projection = None
+        
+    def forward(self, x):
+        if self.conv1 is None:
+            # Lazy initialization
+            in_channels = x.size(1)
+            padding = self.kernel_size // 2
+            
+            if x.ndim == 4:  # 2D
+                self.conv1 = nn.Conv2d(in_channels, self.out_channels, self.kernel_size, 
+                                     stride=self.stride, padding=padding, bias=False).to(x.device, x.dtype)
+                self.bn1 = nn.BatchNorm2d(self.out_channels).to(x.device, x.dtype)
+                self.conv2 = nn.Conv2d(self.out_channels, self.out_channels, self.kernel_size,
+                                     padding=padding, bias=False).to(x.device, x.dtype)
+                self.bn2 = nn.BatchNorm2d(self.out_channels).to(x.device, x.dtype)
+                
+                if in_channels != self.out_channels or self.stride != 1:
+                    self.projection = nn.Conv2d(in_channels, self.out_channels, 1, 
+                                              stride=self.stride, bias=False).to(x.device, x.dtype)
+            else:  # 1D
+                self.conv1 = nn.Conv1d(in_channels, self.out_channels, self.kernel_size,
+                                     stride=self.stride, padding=padding, bias=False).to(x.device, x.dtype)
+                self.bn1 = nn.BatchNorm1d(self.out_channels).to(x.device, x.dtype)
+                self.conv2 = nn.Conv1d(self.out_channels, self.out_channels, self.kernel_size,
+                                     padding=padding, bias=False).to(x.device, x.dtype)
+                self.bn2 = nn.BatchNorm1d(self.out_channels).to(x.device, x.dtype)
+                
+                if in_channels != self.out_channels or self.stride != 1:
+                    self.projection = nn.Conv1d(in_channels, self.out_channels, 1,
+                                              stride=self.stride, bias=False).to(x.device, x.dtype)
+        
+        identity = x
+        if self.projection is not None:
+            identity = self.projection(x)
+        
+        out = F.relu(self.bn1(self.conv1(x)))
+        out = self.bn2(self.conv2(out))
+        out += identity
+        out = F.relu(out)
+        
+        return out
+
+class VGGBlock(nn.Module):
+    \"\"\"
+    VGG-style block: Conv-ReLU-Conv-ReLU-(Pool)
+    - input: (B, C, H, W) or (B, C, T)
+    - c1, c2: channel counts for two conv layers
+    \"\"\"
+    def __init__(self, c1: int, c2: int, kernel_size: int = 3, use_lrn: bool = False, pool: bool = True):
+        super().__init__()
+        self.c1 = c1
+        self.c2 = c2
+        self.kernel_size = kernel_size
+        self.use_lrn = use_lrn
+        self.pool = pool
+        self.conv1 = None
+        self.bn1 = None
+        self.conv2 = None
+        self.bn2 = None
+        self.pool_layer = None
+        
+    def forward(self, x):
+        if self.conv1 is None:
+            # Lazy initialization
+            in_channels = x.size(1)
+            padding = self.kernel_size // 2
+            
+            if x.ndim == 4:  # 2D
+                self.conv1 = nn.Conv2d(in_channels, self.c1, self.kernel_size, padding=padding, bias=False).to(x.device, x.dtype)
+                self.bn1 = nn.BatchNorm2d(self.c1).to(x.device, x.dtype)
+                self.conv2 = nn.Conv2d(self.c1, self.c2, self.kernel_size, padding=padding, bias=False).to(x.device, x.dtype)
+                self.bn2 = nn.BatchNorm2d(self.c2).to(x.device, x.dtype)
+                if self.pool:
+                    self.pool_layer = nn.MaxPool2d(2, 2).to(x.device, x.dtype)
+            else:  # 1D
+                self.conv1 = nn.Conv1d(in_channels, self.c1, self.kernel_size, padding=padding, bias=False).to(x.device, x.dtype)
+                self.bn1 = nn.BatchNorm1d(self.c1).to(x.device, x.dtype)
+                self.conv2 = nn.Conv1d(self.c1, self.c2, self.kernel_size, padding=padding, bias=False).to(x.device, x.dtype)
+                self.bn2 = nn.BatchNorm1d(self.c2).to(x.device, x.dtype)
+                if self.pool:
+                    self.pool_layer = nn.MaxPool1d(2, 2).to(x.device, x.dtype)
+        
+        x = F.relu(self.bn1(self.conv1(x)))
+        if self.use_lrn and x.ndim == 4:
+            x = F.local_response_normalization(x, size=5)
+        x = F.relu(self.bn2(self.conv2(x)))
+        if self.use_lrn and x.ndim == 4:
+            x = F.local_response_normalization(x, size=5)
+        if self.pool and self.pool_layer is not None:
+            x = self.pool_layer(x)
+        
+        return x
 """
     cls = f"""
 class {class_name}(nn.Module):
@@ -184,8 +383,8 @@ class {class_name}(nn.Module):
 if __name__ == "__main__":
     # quick smoke test
     model = ExportedModel()
-    x = torch.randn(4, 9, 256)  # (B,C,T)
-    out = model({"inp": x})
+    x = torch.randn(4, 3, 224, 224)  # (B,C,H,W) for 2D or (B,C,T) for 1D
+    out = model({{"inp": x}})
     print("out.shape =", out.shape)
 """
     return header + cls + main
@@ -279,7 +478,7 @@ with colB:
 st.divider()
 st.subheader("Graph JSON")
 graph = {
-    "version": "0.1",
+    "version": "0.2",
     "metadata": {"name": "torchcanvas_ui"},
     "nodes": st.session_state.nodes,
     "edges": st.session_state.edges,
@@ -311,8 +510,9 @@ with col2:
     if code_str:
         st.caption("⚙️ 스모크 테스트 (임의 텐서)")
         b = st.number_input("Batch", min_value=1, value=4)
-        C = st.number_input("Channels(C)", min_value=1, value=9)
-        T = st.number_input("Length(T)", min_value=1, value=256)
+        C = st.number_input("Channels(C)", min_value=1, value=3)
+        H = st.number_input("Height(H)", min_value=1, value=224)
+        W = st.number_input("Width(W)", min_value=1, value=224)
         run = st.button("Forward 실행")
         if run:
             # exec로 코드 실행해 ExportedModel 로드
@@ -322,8 +522,78 @@ with col2:
                 ExportedModel = ns["ExportedModel"]
                 import torch
                 m = ExportedModel()
-                x = torch.randn(int(b), int(C), int(T))
+                x = torch.randn(int(b), int(C), int(H), int(W))
                 y = m({"inp": x})
                 st.success(f"out.shape = {tuple(y.shape)}")
             except Exception as e:
                 st.error(f"실행 에러: {e}")
+
+# ---------- 템플릿 예시 ----------
+st.divider()
+st.subheader("템플릿 예시")
+
+if st.button("VGG-16 템플릿 로드"):
+    vgg16_template = {
+        "version": "0.2",
+        "metadata": {"name": "vgg16_template"},
+        "nodes": [
+            {"id": "inp", "type": "Input", "params": {}},
+            {"id": "b1", "type": "VGGBlock", "params": {"c1": 64, "c2": 64, "kernel_size": 3, "use_lrn": False, "pool": True}},
+            {"id": "b2", "type": "VGGBlock", "params": {"c1": 128, "c2": 128, "kernel_size": 3, "use_lrn": False, "pool": True}},
+            {"id": "b3", "type": "VGGBlock", "params": {"c1": 256, "c2": 256, "kernel_size": 3, "use_lrn": False, "pool": True}},
+            {"id": "b4", "type": "VGGBlock", "params": {"c1": 512, "c2": 512, "kernel_size": 3, "use_lrn": False, "pool": True}},
+            {"id": "b5", "type": "VGGBlock", "params": {"c1": 512, "c2": 512, "kernel_size": 3, "use_lrn": False, "pool": True}},
+            {"id": "flat", "type": "Flatten", "params": {"start_dim": 1, "end_dim": -1}},
+            {"id": "fc1", "type": "Linear", "params": {"out_features": 4096, "bias": True}},
+            {"id": "relu1", "type": "ReLU", "params": {}},
+            {"id": "drop1", "type": "Dropout", "params": {"p": 0.5}},
+            {"id": "fc2", "type": "Linear", "params": {"out_features": 4096, "bias": True}},
+            {"id": "relu2", "type": "ReLU", "params": {}},
+            {"id": "drop2", "type": "Dropout", "params": {"p": 0.5}},
+            {"id": "fc3", "type": "Linear", "params": {"out_features": 1000, "bias": True}},
+        ],
+        "edges": [
+            ["inp", "b1"], ["b1", "b2"], ["b2", "b3"], ["b3", "b4"], ["b4", "b5"],
+            ["b5", "flat"], ["flat", "fc1"], ["fc1", "relu1"], ["relu1", "drop1"],
+            ["drop1", "fc2"], ["fc2", "relu2"], ["relu2", "drop2"], ["drop2", "fc3"]
+        ],
+        "inputs": ["inp"],
+        "outputs": ["fc3"]
+    }
+    st.session_state.nodes = vgg16_template["nodes"]
+    st.session_state.edges = vgg16_template["edges"]
+    st.session_state.inputs = vgg16_template["inputs"]
+    st.session_state.outputs = vgg16_template["outputs"]
+    st.rerun()
+
+if st.button("ResNet-18 템플릿 로드"):
+    resnet18_template = {
+        "version": "0.2",
+        "metadata": {"name": "resnet18_template"},
+        "nodes": [
+            {"id": "inp", "type": "Input", "params": {}},
+            {"id": "conv1", "type": "Conv2d", "params": {"out_channels": 64, "kernel_size": 7, "stride": 2, "padding": "same"}},
+            {"id": "bn1", "type": "BatchNorm2d", "params": {"num_features": 0}},
+            {"id": "relu1", "type": "ReLU", "params": {}},
+            {"id": "pool1", "type": "MaxPool2d", "params": {"kernel_size": 3, "stride": 2}},
+            {"id": "res1", "type": "ResidualBlock", "params": {"out_channels": 64, "kernel_size": 3, "stride": 1}},
+            {"id": "res2", "type": "ResidualBlock", "params": {"out_channels": 128, "kernel_size": 3, "stride": 2}},
+            {"id": "res3", "type": "ResidualBlock", "params": {"out_channels": 256, "kernel_size": 3, "stride": 2}},
+            {"id": "res4", "type": "ResidualBlock", "params": {"out_channels": 512, "kernel_size": 3, "stride": 2}},
+            {"id": "gap", "type": "MaxPool2d", "params": {"kernel_size": 7, "stride": 1}},
+            {"id": "flat", "type": "Flatten", "params": {"start_dim": 1, "end_dim": -1}},
+            {"id": "fc", "type": "Linear", "params": {"out_features": 1000, "bias": True}},
+        ],
+        "edges": [
+            ["inp", "conv1"], ["conv1", "bn1"], ["bn1", "relu1"], ["relu1", "pool1"],
+            ["pool1", "res1"], ["res1", "res2"], ["res2", "res3"], ["res3", "res4"],
+            ["res4", "gap"], ["gap", "flat"], ["flat", "fc"]
+        ],
+        "inputs": ["inp"],
+        "outputs": ["fc"]
+    }
+    st.session_state.nodes = resnet18_template["nodes"]
+    st.session_state.edges = resnet18_template["edges"]
+    st.session_state.inputs = resnet18_template["inputs"]
+    st.session_state.outputs = resnet18_template["outputs"]
+    st.rerun()
