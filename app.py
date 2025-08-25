@@ -1054,165 +1054,243 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
     html += "</div>"
     return html
 
-# ---------- 메인: 시각적 네트워크 다이어그램 ----------
+# ---------- 메인: 탭 기반 인터페이스 ----------
 st.title("TorchCanvas — 시각적 신경망 디자이너")
 
-# 네트워크 다이어그램 표시
-if st.session_state.nodes:
-    st.subheader("🔍 네트워크 아키텍처 시각화")
-    diagram_html = create_network_diagram(
-        st.session_state.nodes, 
-        st.session_state.edges, 
-        st.session_state.tensor_shapes
-    )
-    st.components.v1.html(diagram_html, height=400, scrolling=True)
-else:
-    st.info("노드를 추가하여 네트워크를 구성하세요.")
+# 탭 생성
+tab1, tab2, tab3, tab4 = st.tabs(["🎨 네트워크 시각화", "⚙️ 코드 생성", "📊 상세 정보", "📋 템플릿"])
 
-# ---------- 텍스트 기반 노드/엣지 편집 ----------
-colA, colB = st.columns([1,1], gap="large")
-with colA:
-    st.subheader("Nodes")
-    st.write(st.session_state.nodes if st.session_state.nodes else "아직 노드가 없습니다.")
+with tab1:
+    # 네트워크 다이어그램 표시 (더 큰 크기)
     if st.session_state.nodes:
-        del_id = st.selectbox("삭제할 노드", ["—"] + [n["id"] for n in st.session_state.nodes], index=0)
-        if del_id != "—" and st.button("노드 삭제"):
-            st.session_state.nodes = [n for n in st.session_state.nodes if n["id"] != del_id]
-            st.session_state.edges = [e for e in st.session_state.edges if e[0]!=del_id and e[1]!=del_id]
-            if del_id in st.session_state.inputs: st.session_state.inputs.remove(del_id)
-            if del_id in st.session_state.outputs: st.session_state.outputs.remove(del_id)
-            if del_id in st.session_state.tensor_shapes: del st.session_state.tensor_shapes[del_id]
-            st.rerun()
+        st.subheader("🔍 네트워크 아키텍처 시각화")
+        
+        # 네트워크 통계 표시
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("총 레이어", len(st.session_state.nodes))
+        with col2:
+            st.metric("연결 수", len(st.session_state.edges))
+        with col3:
+            st.metric("입력", len(st.session_state.inputs))
+        with col4:
+            st.metric("출력", len(st.session_state.outputs))
+        
+        # 더 큰 다이어그램
+        diagram_html = create_network_diagram(
+            st.session_state.nodes, 
+            st.session_state.edges, 
+            st.session_state.tensor_shapes
+        )
+        st.components.v1.html(diagram_html, height=600, scrolling=True)
+        
+        # 빠른 편집 옵션
+        st.subheader("🔧 빠른 편집")
+        colA, colB = st.columns(2)
+        with colA:
+            if st.session_state.nodes:
+                del_id = st.selectbox("삭제할 노드", ["—"] + [n["id"] for n in st.session_state.nodes], index=0)
+                if del_id != "—" and st.button("노드 삭제"):
+                    st.session_state.nodes = [n for n in st.session_state.nodes if n["id"] != del_id]
+                    st.session_state.edges = [e for e in st.session_state.edges if e[0]!=del_id and e[1]!=del_id]
+                    if del_id in st.session_state.inputs: st.session_state.inputs.remove(del_id)
+                    if del_id in st.session_state.outputs: st.session_state.outputs.remove(del_id)
+                    if del_id in st.session_state.tensor_shapes: del st.session_state.tensor_shapes[del_id]
+                    st.rerun()
+        
+        with colB:
+            if st.session_state.edges:
+                idx = st.number_input("삭제할 엣지 index", min_value=0, max_value=max(0,len(st.session_state.edges)-1), value=0, step=1)
+                if st.button("엣지 삭제"):
+                    st.session_state.edges.pop(idx)
+                    st.rerun()
+    else:
+        st.info("노드를 추가하여 네트워크를 구성하세요.")
+        st.image("https://via.placeholder.com/800x400/667eea/ffffff?text=TorchCanvas+Network+Designer", use_column_width=True)
 
-with colB:
-    st.subheader("Edges")
-    st.write(st.session_state.edges if st.session_state.edges else "아직 엣지가 없습니다.")
-    if st.session_state.edges:
-        idx = st.number_input("삭제할 엣지 index", min_value=0, max_value=max(0,len(st.session_state.edges)-1), value=0, step=1)
-        if st.button("엣지 삭제"):
-            st.session_state.edges.pop(idx); st.rerun()
-
-st.divider()
-st.subheader("Graph JSON")
-graph = {
-    "version": "0.2",
-    "metadata": {"name": "torchcanvas_ui"},
-    "nodes": st.session_state.nodes,
-    "edges": st.session_state.edges,
-    "inputs": st.session_state.inputs,
-    "outputs": st.session_state.outputs,
-}
-st.code(json.dumps(graph, indent=2, ensure_ascii=False), language="json")
-
-# ---------- 코드 미리보기 / 다운로드 / 스모크 테스트 ----------
-st.divider()
-st.subheader("Generated PyTorch Code Preview")
-code_str = ""
-err = None
-try:
+with tab2:
+    # 코드 생성 및 다운로드
+    st.subheader("⚙️ PyTorch 코드 생성")
+    
     if st.session_state.nodes and st.session_state.inputs and st.session_state.outputs:
-        code_str = export_graph_to_python(graph, class_name="ExportedModel")
-        st.code(code_str, language="python")
+        graph = {
+            "version": "0.2",
+            "metadata": {"name": "torchcanvas_ui"},
+            "nodes": st.session_state.nodes,
+            "edges": st.session_state.edges,
+            "inputs": st.session_state.inputs,
+            "outputs": st.session_state.outputs,
+        }
+        
+        try:
+            code_str = export_graph_to_python(graph, class_name="ExportedModel")
+            
+            # 코드 미리보기
+            st.code(code_str, language="python")
+            
+            # 다운로드 및 테스트
+            col1, col2 = st.columns([1,1])
+            with col1:
+                st.download_button(
+                    "📥 exported_model.py 다운로드", 
+                    data=code_str.encode("utf-8"),
+                    file_name="exported_model.py", 
+                    mime="text/x-python"
+                )
+            
+            with col2:
+                st.caption("🧪 스모크 테스트")
+                b = st.number_input("Batch", min_value=1, value=4)
+                C = st.number_input("Channels(C)", min_value=1, value=3)
+                H = st.number_input("Height(H)", min_value=1, value=224)
+                W = st.number_input("Width(W)", min_value=1, value=224)
+                run = st.button("Forward 실행")
+                if run:
+                    ns: Dict[str, Any] = {}
+                    try:
+                        exec(code_str, ns, ns)
+                        ExportedModel = ns["ExportedModel"]
+                        import torch
+                        m = ExportedModel()
+                        x = torch.randn(int(b), int(C), int(H), int(W))
+                        y = m({"inp": x})
+                        st.success(f"✅ 성공! 출력 형태: {tuple(y.shape)}")
+                    except Exception as e:
+                        st.error(f"❌ 실행 에러: {e}")
+        except Exception as e:
+            st.error(f"코드 생성 에러: {e}")
     else:
         st.info("노드/엣지/입출력을 먼저 구성하세요.")
-except Exception as e:
-    err = str(e); st.error(err)
 
-col1, col2 = st.columns([1,1])
-with col1:
-    if code_str:
-        st.download_button("exported_model.py 다운로드", data=code_str.encode("utf-8"),
-                           file_name="exported_model.py", mime="text/x-python")
-with col2:
-    if code_str:
-        st.caption("⚙️ 스모크 테스트 (임의 텐서)")
-        b = st.number_input("Batch", min_value=1, value=4)
-        C = st.number_input("Channels(C)", min_value=1, value=3)
-        H = st.number_input("Height(H)", min_value=1, value=224)
-        W = st.number_input("Width(W)", min_value=1, value=224)
-        run = st.button("Forward 실행")
-        if run:
-            # exec로 코드 실행해 ExportedModel 로드
-            ns: Dict[str, Any] = {}
-            try:
-                exec(code_str, ns, ns)
-                ExportedModel = ns["ExportedModel"]
-                import torch
-                m = ExportedModel()
-                x = torch.randn(int(b), int(C), int(H), int(W))
-                y = m({"inp": x})
-                st.success(f"out.shape = {tuple(y.shape)}")
-            except Exception as e:
-                st.error(f"실행 에러: {e}")
+with tab3:
+    # 상세 정보 (JSON, 노드/엣지 상세)
+    st.subheader("📊 상세 정보")
+    
+    # 서브탭
+    sub_tab1, sub_tab2, sub_tab3 = st.tabs(["📋 노드 목록", "🔗 엣지 목록", "📄 Graph JSON"])
+    
+    with sub_tab1:
+        if st.session_state.nodes:
+            for i, node in enumerate(st.session_state.nodes):
+                with st.expander(f"{i+1}. {node['id']} ({node['type']})"):
+                    st.json(node)
+        else:
+            st.info("아직 노드가 없습니다.")
+    
+    with sub_tab2:
+        if st.session_state.edges:
+            for i, edge in enumerate(st.session_state.edges):
+                st.write(f"{i+1}. {edge[0]} → {edge[1]}")
+        else:
+            st.info("아직 엣지가 없습니다.")
+    
+    with sub_tab3:
+        graph = {
+            "version": "0.2",
+            "metadata": {"name": "torchcanvas_ui"},
+            "nodes": st.session_state.nodes,
+            "edges": st.session_state.edges,
+            "inputs": st.session_state.inputs,
+            "outputs": st.session_state.outputs,
+        }
+        st.code(json.dumps(graph, indent=2, ensure_ascii=False), language="json")
 
-# ---------- 템플릿 예시 ----------
-st.divider()
-st.subheader("템플릿 예시")
+with tab4:
+    # 템플릿
+    st.subheader("📋 템플릿 예시")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("🏗️ VGG-16 템플릿 로드"):
+            vgg16_template = {
+                "version": "0.2",
+                "metadata": {"name": "vgg16_template"},
+                "nodes": [
+                    {"id": "inp", "type": "Input", "params": {}},
+                    {"id": "b1", "type": "VGGBlock", "params": {"c1": 64, "c2": 64, "kernel_size": 3, "use_lrn": False, "pool": True}},
+                    {"id": "b2", "type": "VGGBlock", "params": {"c1": 128, "c2": 128, "kernel_size": 3, "use_lrn": False, "pool": True}},
+                    {"id": "b3", "type": "VGGBlock", "params": {"c1": 256, "c2": 256, "kernel_size": 3, "use_lrn": False, "pool": True}},
+                    {"id": "b4", "type": "VGGBlock", "params": {"c1": 512, "c2": 512, "kernel_size": 3, "use_lrn": False, "pool": True}},
+                    {"id": "b5", "type": "VGGBlock", "params": {"c1": 512, "c2": 512, "kernel_size": 3, "use_lrn": False, "pool": True}},
+                    {"id": "flat", "type": "Flatten", "params": {"start_dim": 1, "end_dim": -1}},
+                    {"id": "fc1", "type": "Linear", "params": {"out_features": 4096, "bias": True}},
+                    {"id": "relu1", "type": "ReLU", "params": {}},
+                    {"id": "drop1", "type": "Dropout", "params": {"p": 0.5}},
+                    {"id": "fc2", "type": "Linear", "params": {"out_features": 4096, "bias": True}},
+                    {"id": "relu2", "type": "ReLU", "params": {}},
+                    {"id": "drop2", "type": "Dropout", "params": {"p": 0.5}},
+                    {"id": "fc3", "type": "Linear", "params": {"out_features": 1000, "bias": True}},
+                ],
+                "edges": [
+                    ["inp", "b1"], ["b1", "b2"], ["b2", "b3"], ["b3", "b4"], ["b4", "b5"],
+                    ["b5", "flat"], ["flat", "fc1"], ["fc1", "relu1"], ["relu1", "drop1"],
+                    ["drop1", "fc2"], ["fc2", "relu2"], ["relu2", "drop2"], ["drop2", "fc3"]
+                ],
+                "inputs": ["inp"],
+                "outputs": ["fc3"]
+            }
+            st.session_state.nodes = vgg16_template["nodes"]
+            st.session_state.edges = vgg16_template["edges"]
+            st.session_state.inputs = vgg16_template["inputs"]
+            st.session_state.outputs = vgg16_template["outputs"]
+            st.session_state.tensor_shapes.clear()
+            st.success("VGG-16 템플릿이 로드되었습니다!")
+            st.rerun()
+    
+    with col2:
+        if st.button("🏗️ ResNet-18 템플릿 로드"):
+            resnet18_template = {
+                "version": "0.2",
+                "metadata": {"name": "resnet18_template"},
+                "nodes": [
+                    {"id": "inp", "type": "Input", "params": {}},
+                    {"id": "conv1", "type": "Conv2d", "params": {"out_channels": 64, "kernel_size": 7, "stride": 2, "padding": "same"}},
+                    {"id": "bn1", "type": "BatchNorm2d", "params": {"num_features": 0}},
+                    {"id": "relu1", "type": "ReLU", "params": {}},
+                    {"id": "pool1", "type": "MaxPool2d", "params": {"kernel_size": 3, "stride": 2}},
+                    {"id": "res1", "type": "ResidualBlock", "params": {"out_channels": 64, "kernel_size": 3, "stride": 1}},
+                    {"id": "res2", "type": "ResidualBlock", "params": {"out_channels": 128, "kernel_size": 3, "stride": 2}},
+                    {"id": "res3", "type": "ResidualBlock", "params": {"out_channels": 256, "kernel_size": 3, "stride": 2}},
+                    {"id": "res4", "type": "ResidualBlock", "params": {"out_channels": 512, "kernel_size": 3, "stride": 2}},
+                    {"id": "gap", "type": "MaxPool2d", "params": {"kernel_size": 7, "stride": 1}},
+                    {"id": "flat", "type": "Flatten", "params": {"start_dim": 1, "end_dim": -1}},
+                    {"id": "fc", "type": "Linear", "params": {"out_features": 1000, "bias": True}},
+                ],
+                "edges": [
+                    ["inp", "conv1"], ["conv1", "bn1"], ["bn1", "relu1"], ["relu1", "pool1"],
+                    ["pool1", "res1"], ["res1", "res2"], ["res2", "res3"], ["res3", "res4"],
+                    ["res4", "gap"], ["gap", "flat"], ["flat", "fc"]
+                ],
+                "inputs": ["inp"],
+                "outputs": ["fc"]
+            }
+            st.session_state.nodes = resnet18_template["nodes"]
+            st.session_state.edges = resnet18_template["edges"]
+            st.session_state.inputs = resnet18_template["inputs"]
+            st.session_state.outputs = resnet18_template["outputs"]
+            st.session_state.tensor_shapes.clear()
+            st.success("ResNet-18 템플릿이 로드되었습니다!")
+            st.rerun()
+    
+    st.divider()
+    st.subheader("📚 템플릿 설명")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("""
+        **VGG-16**
+        - 13개 컨볼루션 레이어 + 3개 완전연결 레이어
+        - 이미지 분류에 특화
+        - 깊은 네트워크 구조
+        """)
+    
+    with col2:
+        st.markdown("""
+        **ResNet-18**
+        - 잔차 연결을 사용한 18층 네트워크
+        - 그래디언트 소실 문제 해결
+        - 효율적인 학습 가능
+        """)
 
-if st.button("VGG-16 템플릿 로드"):
-    vgg16_template = {
-        "version": "0.2",
-        "metadata": {"name": "vgg16_template"},
-        "nodes": [
-            {"id": "inp", "type": "Input", "params": {}},
-            {"id": "b1", "type": "VGGBlock", "params": {"c1": 64, "c2": 64, "kernel_size": 3, "use_lrn": False, "pool": True}},
-            {"id": "b2", "type": "VGGBlock", "params": {"c1": 128, "c2": 128, "kernel_size": 3, "use_lrn": False, "pool": True}},
-            {"id": "b3", "type": "VGGBlock", "params": {"c1": 256, "c2": 256, "kernel_size": 3, "use_lrn": False, "pool": True}},
-            {"id": "b4", "type": "VGGBlock", "params": {"c1": 512, "c2": 512, "kernel_size": 3, "use_lrn": False, "pool": True}},
-            {"id": "b5", "type": "VGGBlock", "params": {"c1": 512, "c2": 512, "kernel_size": 3, "use_lrn": False, "pool": True}},
-            {"id": "flat", "type": "Flatten", "params": {"start_dim": 1, "end_dim": -1}},
-            {"id": "fc1", "type": "Linear", "params": {"out_features": 4096, "bias": True}},
-            {"id": "relu1", "type": "ReLU", "params": {}},
-            {"id": "drop1", "type": "Dropout", "params": {"p": 0.5}},
-            {"id": "fc2", "type": "Linear", "params": {"out_features": 4096, "bias": True}},
-            {"id": "relu2", "type": "ReLU", "params": {}},
-            {"id": "drop2", "type": "Dropout", "params": {"p": 0.5}},
-            {"id": "fc3", "type": "Linear", "params": {"out_features": 1000, "bias": True}},
-        ],
-        "edges": [
-            ["inp", "b1"], ["b1", "b2"], ["b2", "b3"], ["b3", "b4"], ["b4", "b5"],
-            ["b5", "flat"], ["flat", "fc1"], ["fc1", "relu1"], ["relu1", "drop1"],
-            ["drop1", "fc2"], ["fc2", "relu2"], ["relu2", "drop2"], ["drop2", "fc3"]
-        ],
-        "inputs": ["inp"],
-        "outputs": ["fc3"]
-    }
-    st.session_state.nodes = vgg16_template["nodes"]
-    st.session_state.edges = vgg16_template["edges"]
-    st.session_state.inputs = vgg16_template["inputs"]
-    st.session_state.outputs = vgg16_template["outputs"]
-    st.session_state.tensor_shapes.clear()
-    st.rerun()
 
-if st.button("ResNet-18 템플릿 로드"):
-    resnet18_template = {
-        "version": "0.2",
-        "metadata": {"name": "resnet18_template"},
-        "nodes": [
-            {"id": "inp", "type": "Input", "params": {}},
-            {"id": "conv1", "type": "Conv2d", "params": {"out_channels": 64, "kernel_size": 7, "stride": 2, "padding": "same"}},
-            {"id": "bn1", "type": "BatchNorm2d", "params": {"num_features": 0}},
-            {"id": "relu1", "type": "ReLU", "params": {}},
-            {"id": "pool1", "type": "MaxPool2d", "params": {"kernel_size": 3, "stride": 2}},
-            {"id": "res1", "type": "ResidualBlock", "params": {"out_channels": 64, "kernel_size": 3, "stride": 1}},
-            {"id": "res2", "type": "ResidualBlock", "params": {"out_channels": 128, "kernel_size": 3, "stride": 2}},
-            {"id": "res3", "type": "ResidualBlock", "params": {"out_channels": 256, "kernel_size": 3, "stride": 2}},
-            {"id": "res4", "type": "ResidualBlock", "params": {"out_channels": 512, "kernel_size": 3, "stride": 2}},
-            {"id": "gap", "type": "MaxPool2d", "params": {"kernel_size": 7, "stride": 1}},
-            {"id": "flat", "type": "Flatten", "params": {"start_dim": 1, "end_dim": -1}},
-            {"id": "fc", "type": "Linear", "params": {"out_features": 1000, "bias": True}},
-        ],
-        "edges": [
-            ["inp", "conv1"], ["conv1", "bn1"], ["bn1", "relu1"], ["relu1", "pool1"],
-            ["pool1", "res1"], ["res1", "res2"], ["res2", "res3"], ["res3", "res4"],
-            ["res4", "gap"], ["gap", "flat"], ["flat", "fc"]
-        ],
-        "inputs": ["inp"],
-        "outputs": ["fc"]
-    }
-    st.session_state.nodes = resnet18_template["nodes"]
-    st.session_state.edges = resnet18_template["edges"]
-    st.session_state.inputs = resnet18_template["inputs"]
-    st.session_state.outputs = resnet18_template["outputs"]
-    st.session_state.tensor_shapes.clear()
-    st.rerun()
