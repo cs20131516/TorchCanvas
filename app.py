@@ -478,7 +478,7 @@ def calculate_model_statistics(nodes: List[dict], edges: List[List[str]], tensor
 
 # ---------- 개선된 시각적 네트워크 다이어그램 생성 ----------
 def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_shapes: Dict[str, tuple]) -> str:
-    """HTML/CSS로 네트워크 다이어그램 생성 (향상된 연결 시스템)"""
+    """HTML/CSS로 네트워크 다이어그램 생성 (화살표 드래그 연결 시스템)"""
     
     # 연결 타입 분석
     def analyze_connections():
@@ -805,6 +805,85 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
         font-size: 10px;
         box-shadow: 0 2px 5px rgba(255, 193, 7, 0.5);
     }
+    
+    /* 화살표 드래그 연결 시스템 */
+    .drawing-arrow {
+        stroke: #ff6b6b;
+        stroke-width: 3;
+        stroke-dasharray: 5,5;
+        fill: none;
+        pointer-events: all;
+        cursor: crosshair;
+    }
+    
+    .arrow-preview {
+        stroke: #ff6b6b;
+        stroke-width: 2;
+        stroke-dasharray: 3,3;
+        fill: none;
+        opacity: 0.7;
+        pointer-events: none;
+    }
+    
+    .connection-point {
+        fill: #667eea;
+        stroke: white;
+        stroke-width: 2;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+    .connection-point:hover {
+        fill: #ff6b6b;
+        transform: scale(1.2);
+    }
+    .connection-point.active {
+        fill: #ff6b6b;
+        stroke: #ff6b6b;
+        stroke-width: 3;
+    }
+    
+    .drawing-mode {
+        background: rgba(255, 107, 107, 0.1);
+        border: 2px dashed #ff6b6b;
+    }
+    
+    .connection-toolbar {
+        background: rgba(255, 255, 255, 0.95);
+        border-radius: 10px;
+        padding: 15px;
+        margin: 20px 0;
+        text-align: center;
+        border: 2px solid #667eea;
+    }
+    .connection-toolbar h5 {
+        color: #667eea;
+        margin: 0 0 10px 0;
+        font-size: 16px;
+    }
+    .toolbar-buttons {
+        display: flex;
+        justify-content: center;
+        gap: 10px;
+        flex-wrap: wrap;
+    }
+    .toolbar-btn {
+        padding: 8px 16px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: bold;
+        transition: all 0.2s ease;
+    }
+    .toolbar-btn.active {
+        transform: scale(1.05);
+        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    }
+    .toolbar-btn.sequential { background: #28a745; color: white; }
+    .toolbar-btn.skip { background: #ffc107; color: white; }
+    .toolbar-btn.branch { background: #17a2b8; color: white; }
+    .toolbar-btn.merge { background: #e83e8c; color: white; }
+    .toolbar-btn.cancel { background: #6c757d; color: white; }
     </style>
     <div class="network-container">
     """
@@ -812,12 +891,25 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
     # 연결 안내 메시지
     html += """
     <div class="connection-instructions">
-        <h4>🔗 향상된 연결 시스템</h4>
-        <p>• <strong>순차 연결</strong>: 기본적인 레이어 간 연결 (실선)</p>
-        <p>• <strong>스킵 커넥션</strong>: ResNet 스타일의 잔차 연결 (점선, 곡선)</p>
-        <p>• <strong>분기/병합</strong>: 여러 입력/출력을 가진 복잡한 구조 (다양한 점선)</p>
-        <p>• <strong>시각적 표시</strong>: Add 노드는 주황색, 스킵 소스는 ⏭️ 아이콘</p>
-        <p>• <strong>클릭 연결</strong>: 레이어를 클릭하여 연결 타입 선택 후 연결</p>
+        <h4>🎯 화살표 드래그 연결 시스템</h4>
+        <p>• <strong>드래그 연결</strong>: 레이어를 드래그하여 화살표로 연결</p>
+        <p>• <strong>연결 타입 선택</strong>: 연결 전에 타입을 선택하여 시각적 구분</p>
+        <p>• <strong>실시간 미리보기</strong>: 드래그 중인 화살표를 실시간으로 확인</p>
+        <p>• <strong>ESC 취소</strong>: ESC 키로 연결 작업 취소</p>
+    </div>
+    """
+    
+    # 연결 도구 모음
+    html += """
+    <div class="connection-toolbar">
+        <h5>🔗 연결 도구</h5>
+        <div class="toolbar-buttons">
+            <button class="toolbar-btn sequential active" onclick="setConnectionType('sequential')">순차 연결</button>
+            <button class="toolbar-btn skip" onclick="setConnectionType('skip')">스킵 커넥션</button>
+            <button class="toolbar-btn branch" onclick="setConnectionType('branch')">분기 연결</button>
+            <button class="toolbar-btn merge" onclick="setConnectionType('merge')">병합 연결</button>
+            <button class="toolbar-btn cancel" onclick="cancelDrawing()">취소</button>
+        </div>
     </div>
     """
     
@@ -871,6 +963,22 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
             <marker id="arrowhead" markerWidth="12" markerHeight="8" 
                     refX="11" refY="4" orient="auto">
                 <polygon points="0 0, 12 4, 0 8" fill="#667eea" />
+            </marker>
+            <marker id="arrowhead-sequential" markerWidth="12" markerHeight="8" 
+                    refX="11" refY="4" orient="auto">
+                <polygon points="0 0, 12 4, 0 8" fill="#28a745" />
+            </marker>
+            <marker id="arrowhead-skip" markerWidth="12" markerHeight="8" 
+                    refX="11" refY="4" orient="auto">
+                <polygon points="0 0, 12 4, 0 8" fill="#ffc107" />
+            </marker>
+            <marker id="arrowhead-branch" markerWidth="12" markerHeight="8" 
+                    refX="11" refY="4" orient="auto">
+                <polygon points="0 0, 12 4, 0 8" fill="#17a2b8" />
+            </marker>
+            <marker id="arrowhead-merge" markerWidth="12" markerHeight="8" 
+                    refX="11" refY="4" orient="auto">
+                <polygon points="0 0, 12 4, 0 8" fill="#e83e8c" />
             </marker>
         </defs>
     '''
@@ -960,7 +1068,7 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
         extra_class_str = " " + " ".join(extra_classes) if extra_classes else ""
         
         html += f"""
-        <div class="layer{extra_class_str}" style="border-left-color: {category_color};" data-node-id="{node_id}" onclick="handleLayerClick('{node_id}')">
+        <div class="layer{extra_class_str}" style="border-left-color: {category_color};" data-node-id="{node_id}" data-node-type="{node_type}">
             <div class="category-badge" style="background-color: {category_color};">{category_name}</div>
             <div class="connection-badge {connection_type}">{connection_type}</div>
             <div class="layer-header">
@@ -973,6 +1081,12 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
             {f'<div class="params">{param_str}</div>' if param_str else ''}
         </div>
         """
+        
+        # 연결점 추가 (입력/출력 포인트)
+        html += f'''
+        <circle class="connection-point" cx="{x_pos + 140}" cy="{y_pos + 80}" r="6" data-node-id="{node_id}" data-point-type="output" />
+        <circle class="connection-point" cx="{x_pos - 140}" cy="{y_pos + 80}" r="6" data-node-id="{node_id}" data-point-type="input" />
+        '''
     
     # 연결선 그리기 (개선된 스타일링)
     for src, dst in edges:
@@ -1020,141 +1134,190 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
             html += f'''
             <path class="connection-line {line_type}" 
                   d="{path_d}"
-                  marker-end="url(#arrowhead)" />
+                  marker-end="url(#arrowhead-{line_type})" />
             '''
     
     html += "</svg></div>"
     
-    # JavaScript for enhanced drag and drop connections
+    # JavaScript for 화살표 드래그 연결 시스템
     html += """
     <script>
-    let connectionSource = null;
-    let connectionTarget = null;
-    let connectionMode = 'normal'; // 'normal', 'skip', 'branch', 'merge'
+    let isDrawing = false;
+    let drawingStartPoint = null;
+    let currentConnectionType = 'sequential';
+    let drawingArrow = null;
+    let previewArrow = null;
     
-    function handleLayerClick(nodeId) {
-        if (!connectionSource) {
-            // Start connection
-            connectionSource = nodeId;
-            document.querySelector(`[data-node-id="${nodeId}"]`).classList.add('connection-source');
-            console.log('Connection started from:', nodeId);
+    // 연결 타입 설정
+    function setConnectionType(type) {
+        currentConnectionType = type;
+        
+        // 버튼 활성화 상태 업데이트
+        document.querySelectorAll('.toolbar-btn').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        event.target.classList.add('active');
+        
+        console.log('Connection type set to:', type);
+    }
+    
+    // 연결점 클릭 이벤트
+    document.addEventListener('DOMContentLoaded', function() {
+        const connectionPoints = document.querySelectorAll('.connection-point');
+        
+        connectionPoints.forEach(point => {
+            point.addEventListener('mousedown', startDrawing);
+            point.addEventListener('mouseenter', highlightPoint);
+            point.addEventListener('mouseleave', unhighlightPoint);
+        });
+        
+        // 마우스 이동 이벤트
+        document.addEventListener('mousemove', updateDrawing);
+        document.addEventListener('mouseup', endDrawing);
+        
+        // ESC 키로 취소
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                cancelDrawing();
+            }
+        });
+    });
+    
+    function startDrawing(event) {
+        if (event.target.dataset.pointType === 'output') {
+            isDrawing = true;
+            drawingStartPoint = {
+                x: event.clientX,
+                y: event.clientY,
+                nodeId: event.target.dataset.nodeId
+            };
             
-            // Show connection mode options
-            showConnectionModeOptions();
-        } else if (connectionSource === nodeId) {
-            // Cancel connection if clicking same node
-            cancelConnection();
-        } else {
-            // Complete connection
-            connectionTarget = nodeId;
-            document.querySelector(`[data-node-id="${nodeId}"]`).classList.add('connection-target');
+            // 드래그 시작 시각적 피드백
+            event.target.classList.add('active');
             
-            // Send connection to Streamlit with mode
-            if (window.parent && window.parent.postMessage) {
-                window.parent.postMessage({
-                    type: 'add_connection',
-                    source: connectionSource,
-                    target: connectionTarget,
-                    mode: connectionMode
-                }, '*');
+            // 미리보기 화살표 생성
+            const svg = document.querySelector('.connection-lines');
+            previewArrow = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            previewArrow.setAttribute('class', 'arrow-preview');
+            previewArrow.setAttribute('marker-end', `url(#arrowhead-${currentConnectionType})`);
+            svg.appendChild(previewArrow);
+            
+            console.log('Started drawing from:', drawingStartPoint.nodeId);
+        }
+    }
+    
+    function updateDrawing(event) {
+        if (isDrawing && previewArrow) {
+            const startX = drawingStartPoint.x;
+            const startY = drawingStartPoint.y;
+            const endX = event.clientX;
+            const endY = event.clientY;
+            
+            // 곡선 경로 계산
+            const midX = (startX + endX) / 2;
+            const midY = (startY + endY) / 2;
+            
+            let pathD;
+            if (currentConnectionType === 'skip') {
+                // 스킵 커넥션은 더 곡선적인 경로
+                const ctrl1X = startX + (endX - startX) * 0.4;
+                const ctrl1Y = startY - 50;
+                const ctrl2X = endX - (endX - startX) * 0.4;
+                const ctrl2Y = endY - 50;
+                pathD = `M ${startX} ${startY} C ${ctrl1X} ${ctrl1Y}, ${ctrl2X} ${ctrl2Y}, ${endX} ${endY}`;
+            } else {
+                // 일반적인 곡선
+                pathD = `M ${startX} ${startY} Q ${midX} ${startY} ${midX} ${midY} T ${endX} ${endY}`;
             }
             
-            // Visual feedback
-            setTimeout(() => {
-                cancelConnection();
-                // Trigger page reload to show new connection
-                window.location.reload();
-            }, 800);
+            previewArrow.setAttribute('d', pathD);
         }
     }
     
-    function showConnectionModeOptions() {
-        // Create connection mode selector
-        const selector = document.createElement('div');
-        selector.style.cssText = `
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: white;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-            z-index: 1000;
-            text-align: center;
-        `;
-        selector.innerHTML = `
-            <h4>연결 타입 선택</h4>
-            <button onclick="setConnectionMode('normal')" style="margin: 5px; padding: 8px 16px; border: none; border-radius: 5px; background: #28a745; color: white; cursor: pointer;">순차 연결</button>
-            <button onclick="setConnectionMode('skip')" style="margin: 5px; padding: 8px 16px; border: none; border-radius: 5px; background: #ffc107; color: white; cursor: pointer;">스킵 커넥션</button>
-            <button onclick="setConnectionMode('branch')" style="margin: 5px; padding: 8px 16px; border: none; border-radius: 5px; background: #17a2b8; color: white; cursor: pointer;">분기 연결</button>
-            <button onclick="setConnectionMode('merge')" style="margin: 5px; padding: 8px 16px; border: none; border-radius: 5px; background: #e83e8c; color: white; cursor: pointer;">병합 연결</button>
-            <button onclick="cancelConnection()" style="margin: 5px; padding: 8px 16px; border: none; border-radius: 5px; background: #6c757d; color: white; cursor: pointer;">취소</button>
-        `;
-        selector.id = 'connection-mode-selector';
-        document.body.appendChild(selector);
+    function endDrawing(event) {
+        if (isDrawing) {
+            const targetPoint = event.target;
+            
+            if (targetPoint.classList.contains('connection-point') && 
+                targetPoint.dataset.pointType === 'input' &&
+                targetPoint.dataset.nodeId !== drawingStartPoint.nodeId) {
+                
+                // 연결 생성
+                const sourceNodeId = drawingStartPoint.nodeId;
+                const targetNodeId = targetPoint.dataset.nodeId;
+                
+                console.log('Creating connection:', sourceNodeId, '->', targetNodeId, 'type:', currentConnectionType);
+                
+                // Streamlit에 연결 정보 전송
+                if (window.parent && window.parent.postMessage) {
+                    window.parent.postMessage({
+                        type: 'add_connection',
+                        source: sourceNodeId,
+                        target: targetNodeId,
+                        mode: currentConnectionType
+                    }, '*');
+                }
+                
+                // 성공적인 연결 시각적 피드백
+                targetPoint.classList.add('active');
+                setTimeout(() => {
+                    targetPoint.classList.remove('active');
+                }, 500);
+            }
+            
+            // 드래그 상태 정리
+            cleanupDrawing();
+        }
     }
     
-    function setConnectionMode(mode) {
-        connectionMode = mode;
-        document.getElementById('connection-mode-selector').remove();
-        console.log('Connection mode set to:', mode);
+    function cancelDrawing() {
+        cleanupDrawing();
+        console.log('Drawing cancelled');
     }
     
-    function cancelConnection() {
-        if (connectionSource) {
-            document.querySelector(`[data-node-id="${connectionSource}"]`).classList.remove('connection-source');
-        }
-        if (connectionTarget) {
-            document.querySelector(`[data-node-id="${connectionTarget}"]`).classList.remove('connection-target');
-        }
-        connectionSource = null;
-        connectionTarget = null;
-        connectionMode = 'normal';
+    function cleanupDrawing() {
+        isDrawing = false;
+        drawingStartPoint = null;
         
-        // Remove connection mode selector if exists
-        const selector = document.getElementById('connection-mode-selector');
-        if (selector) {
-            selector.remove();
+        // 활성화된 연결점 제거
+        document.querySelectorAll('.connection-point.active').forEach(point => {
+            point.classList.remove('active');
+        });
+        
+        // 미리보기 화살표 제거
+        if (previewArrow) {
+            previewArrow.remove();
+            previewArrow = null;
         }
     }
     
-    // ESC key to cancel connection
-    document.addEventListener('keydown', function(event) {
-        if (event.key === 'Escape') {
-            cancelConnection();
+    function highlightPoint(event) {
+        if (!isDrawing) {
+            event.target.style.transform = 'scale(1.3)';
+            event.target.style.fill = '#ff6b6b';
         }
-    });
+    }
     
-    // Click outside to cancel connection
-    document.addEventListener('click', function(event) {
-        if (!event.target.closest('.layer') && !event.target.closest('#connection-mode-selector') && connectionSource) {
-            cancelConnection();
+    function unhighlightPoint(event) {
+        if (!isDrawing) {
+            event.target.style.transform = '';
+            event.target.style.fill = '';
         }
-    });
+    }
     
-    // Add hover effects for better UX
+    // 레이어 호버 효과
     document.addEventListener('DOMContentLoaded', function() {
         const layers = document.querySelectorAll('.layer');
         layers.forEach(layer => {
             layer.addEventListener('mouseenter', function() {
-                if (connectionSource && connectionSource !== this.dataset.nodeId) {
-                    this.style.transform = 'scale(1.1)';
-                    this.style.boxShadow = '0 0 30px rgba(0, 123, 255, 0.4)';
-                    
-                    // 연결 타입에 따른 색상 변경
-                    if (connectionMode === 'skip') {
-                        this.style.boxShadow = '0 0 30px rgba(255, 193, 7, 0.4)';
-                    } else if (connectionMode === 'branch') {
-                        this.style.boxShadow = '0 0 30px rgba(23, 162, 184, 0.4)';
-                    } else if (connectionMode === 'merge') {
-                        this.style.boxShadow = '0 0 30px rgba(232, 62, 140, 0.4)';
-                    }
+                if (!isDrawing) {
+                    this.style.transform = 'translateY(-3px) scale(1.02)';
+                    this.style.boxShadow = '0 15px 40px rgba(0,0,0,0.25)';
                 }
             });
             
             layer.addEventListener('mouseleave', function() {
-                if (connectionSource && connectionSource !== this.dataset.nodeId) {
+                if (!isDrawing) {
                     this.style.transform = '';
                     this.style.boxShadow = '';
                 }
