@@ -564,6 +564,44 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
         cursor: pointer;
         user-select: none;
     }
+    
+    /* Input/Output 노드를 더 작고 컴팩트하게 만들기 */
+    .layer.io-node {
+        min-height: 120px;
+        padding: 15px;
+        max-width: 200px;
+    }
+    .layer.io-node .layer-header {
+        margin-bottom: 8px;
+    }
+    .layer.io-node .layer-icon {
+        font-size: 24px;
+        margin-right: 8px;
+    }
+    .layer.io-node .layer-name {
+        font-size: 14px;
+    }
+    .layer.io-node .tensor-shape {
+        padding: 8px 12px;
+        margin: 8px 0;
+        font-size: 12px;
+    }
+    .layer.io-node .connection-info {
+        font-size: 10px;
+        margin-top: 8px;
+        padding: 6px;
+    }
+    .layer.io-node .params {
+        display: none;
+    }
+    .layer.io-node .connection-badge {
+        font-size: 9px;
+        padding: 3px 6px;
+    }
+    .layer.io-node .category-badge {
+        font-size: 9px;
+        padding: 3px 6px;
+    }
     .layer:hover {
         transform: translateY(-3px);
         box-shadow: 0 15px 40px rgba(0,0,0,0.25);
@@ -668,10 +706,11 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
         z-index: 1;
     }
     .connection-line {
-        stroke-width: 3;
+        stroke-width: 5;
         fill: none;
-        opacity: 0.8;
+        opacity: 0.95;
         marker-end: url(#arrowhead);
+        filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
     }
     .connection-line.sequential {
         stroke: #28a745;
@@ -680,6 +719,7 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
     .connection-line.skip {
         stroke: #ffc107;
         stroke-dasharray: 10,5;
+        stroke-width: 6;
     }
     .connection-line.branch {
         stroke: #17a2b8;
@@ -692,6 +732,16 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
     .connection-line.complex {
         stroke: #6f42c1;
         stroke-dasharray: 20,10,5,10;
+    }
+    
+    /* 연결선 hover 효과 개선 */
+    .connection-line:hover {
+        stroke-width: 7;
+        opacity: 1;
+        filter: drop-shadow(0 3px 6px rgba(0,0,0,0.4));
+    }
+    .connection-line.skip:hover {
+        stroke-width: 8;
     }
     
     .layer {
@@ -809,20 +859,22 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
     /* 화살표 드래그 연결 시스템 */
     .drawing-arrow {
         stroke: #ff6b6b;
-        stroke-width: 3;
-        stroke-dasharray: 5,5;
+        stroke-width: 5;
+        stroke-dasharray: 8,8;
         fill: none;
         pointer-events: all;
         cursor: crosshair;
+        filter: drop-shadow(0 2px 4px rgba(255, 107, 107, 0.4));
     }
     
     .arrow-preview {
         stroke: #ff6b6b;
-        stroke-width: 2;
-        stroke-dasharray: 3,3;
+        stroke-width: 4;
+        stroke-dasharray: 6,6;
         fill: none;
-        opacity: 0.7;
+        opacity: 0.9;
         pointer-events: none;
+        filter: drop-shadow(0 2px 4px rgba(255, 107, 107, 0.3));
     }
     
     .connection-point {
@@ -834,7 +886,8 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
     }
     .connection-point:hover {
         fill: #ff6b6b;
-        transform: scale(1.2);
+        transform: scale(1.3);
+        stroke-width: 3;
     }
     .connection-point.active {
         fill: #ff6b6b;
@@ -960,25 +1013,25 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
     html += '''
     <svg class="connection-lines" xmlns="http://www.w3.org/2000/svg">
         <defs>
-            <marker id="arrowhead" markerWidth="12" markerHeight="8" 
-                    refX="11" refY="4" orient="auto">
-                <polygon points="0 0, 12 4, 0 8" fill="#667eea" />
+            <marker id="arrowhead" markerWidth="18" markerHeight="12" 
+                    refX="17" refY="6" orient="auto">
+                <polygon points="0 0, 18 6, 0 12" fill="#667eea" />
             </marker>
-            <marker id="arrowhead-sequential" markerWidth="12" markerHeight="8" 
-                    refX="11" refY="4" orient="auto">
-                <polygon points="0 0, 12 4, 0 8" fill="#28a745" />
+            <marker id="arrowhead-sequential" markerWidth="18" markerHeight="12" 
+                    refX="17" refY="6" orient="auto">
+                <polygon points="0 0, 18 6, 0 12" fill="#28a745" />
             </marker>
-            <marker id="arrowhead-skip" markerWidth="12" markerHeight="8" 
-                    refX="11" refY="4" orient="auto">
-                <polygon points="0 0, 12 4, 0 8" fill="#ffc107" />
+            <marker id="arrowhead-skip" markerWidth="20" markerHeight="14" 
+                    refX="19" refY="7" orient="auto">
+                <polygon points="0 0, 20 7, 0 14" fill="#ffc107" />
             </marker>
-            <marker id="arrowhead-branch" markerWidth="12" markerHeight="8" 
-                    refX="11" refY="4" orient="auto">
-                <polygon points="0 0, 12 4, 0 8" fill="#17a2b8" />
+            <marker id="arrowhead-branch" markerWidth="18" markerHeight="12" 
+                    refX="17" refY="6" orient="auto">
+                <polygon points="0 0, 18 6, 0 12" fill="#17a2b8" />
             </marker>
-            <marker id="arrowhead-merge" markerWidth="12" markerHeight="8" 
-                    refX="11" refY="4" orient="auto">
-                <polygon points="0 0, 12 4, 0 8" fill="#e83e8c" />
+            <marker id="arrowhead-merge" markerWidth="18" markerHeight="12" 
+                    refX="17" refY="6" orient="auto">
+                <polygon points="0 0, 18 6, 0 12" fill="#e83e8c" />
             </marker>
         </defs>
     '''
@@ -1065,6 +1118,10 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
         if is_skip_source:
             extra_classes.append("skip-source")
         
+        # Input/Output 노드에 io-node 클래스 추가
+        if node_type in ["Input", "Output"]:
+            extra_classes.append("io-node")
+        
         extra_class_str = " " + " ".join(extra_classes) if extra_classes else ""
         
         html += f"""
@@ -1082,10 +1139,18 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
         </div>
         """
         
-        # 연결점 추가 (입력/출력 포인트)
+        # 연결점 추가 (입력/출력 포인트) - io-node의 경우 위치 조정
+        if node_type in ["Input", "Output"]:
+            # io-node는 더 작으므로 연결점 위치 조정
+            output_cy = y_pos + 60  # 더 위쪽으로
+            input_cy = y_pos + 60
+        else:
+            output_cy = y_pos + 80
+            input_cy = y_pos + 80
+        
         html += f'''
-        <circle class="connection-point" cx="{x_pos + 140}" cy="{y_pos + 80}" r="6" data-node-id="{node_id}" data-point-type="output" />
-        <circle class="connection-point" cx="{x_pos - 140}" cy="{y_pos + 80}" r="6" data-node-id="{node_id}" data-point-type="input" />
+        <circle class="connection-point" cx="{x_pos + 140}" cy="{output_cy}" r="6" data-node-id="{node_id}" data-point-type="output" />
+        <circle class="connection-point" cx="{x_pos - 140}" cy="{input_cy}" r="6" data-node-id="{node_id}" data-point-type="input" />
         '''
     
     # 연결선 그리기 (개선된 스타일링)
