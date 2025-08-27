@@ -258,6 +258,36 @@ def find_path_to_node(start_id: str, end_id: str, edges: List[List[str]]) -> Lis
     
     return []  # 경로를 찾지 못한 경우
 
+def compute_levels(nodes, edges, inputs):
+    """토폴로지 기준으로 노드 레벨을 계산하는 함수"""
+    nid2idx = {n["id"]: i for i, n in enumerate(nodes)}
+    adj, indeg = {}, {n["id"]: 0 for n in nodes}
+    for s, d in edges:
+        adj.setdefault(s, []).append(d)
+        indeg[d] += 1
+
+    # 입력 레벨 0
+    level = {n["id"]: 0 for n in nodes}
+    from collections import deque
+    q = deque(inputs if inputs else [n["id"] for n in nodes if indeg[n["id"]]==0])
+
+    visited = set(q)
+    while q:
+        u = q.popleft()
+        for v in adj.get(u, []):
+            level[v] = max(level[v], level[u] + 1)
+            indeg[v] -= 1
+            if indeg[v] == 0 and v not in visited:
+                visited.add(v); q.append(v)
+
+    # 같은 레벨 내에서 세로 인덱스 부여
+    buckets = {}
+    for n in nodes:
+        buckets.setdefault(level[n["id"]], []).append(n["id"])
+    row_index = {nid: i for L, ids in buckets.items() for i, nid in enumerate(ids)}
+
+    return level, row_index
+
 # ---------- 텐서 형태 추정 함수 ----------
 def estimate_tensor_shape(node_id: str, node_type: str, params: dict, input_shapes: List[tuple]) -> tuple:
     """노드의 출력 텐서 형태를 추정"""
@@ -477,16 +507,16 @@ def calculate_model_statistics(nodes: List[dict], edges: List[List[str]], tensor
     return stats
 
 # ---------- 개선된 시각적 네트워크 다이어그램 생성 ----------
-def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_shapes: Dict[str, tuple]) -> str:
+def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_shapes: Dict[str, tuple], compact: bool = True, collapse_composites: bool = True, focus_path: List[str] = None) -> str:
     """HTML/CSS로 네트워크 다이어그램 생성 (화살표 드래그 연결 시스템)"""
     
-    # 연결 타입 분석
+    # 간단한 연결 분석 (안전한 버전)
     def analyze_connections():
         connection_types = {
             "sequential": [],  # 순차 연결
-            "skip": [],       # 스킵 커넥션 (ResNet 스타일)
-            "branch": [],     # 분기 (여러 입력)
-            "merge": [],      # 병합 (여러 출력)
+            "skip": [],       # 스킵 커넥션
+            "branch": [],     # 분기
+            "merge": [],      # 병합
             "complex": []     # 복잡한 연결
         }
         
@@ -503,28 +533,9 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
                 "fan_out": len(outgoing)
             }
         
-        # 연결 타입 분류 (개선된 로직)
+        # 모든 연결을 sequential로 분류 (안전한 기본값)
         for src, dst in edges:
-            src_conn = node_connections[src]
-            dst_conn = node_connections[dst]
-            
-            # 스킵 커넥션 감지 (ResNet 스타일)
-            # Add 노드로 들어가는 연결 중 하나는 스킵 커넥션일 가능성이 높음
-            dst_node = next((n for n in nodes if n["id"] == dst), None)
-            if dst_node and dst_node["type"] == "Add":
-                # Add 노드로 들어가는 연결은 스킵 커넥션으로 분류
-                connection_types["skip"].append((src, dst))
-            elif src_conn["fan_out"] == 1 and dst_conn["fan_in"] == 1:
-                # 간단한 순차 연결
-                connection_types["sequential"].append((src, dst))
-            elif dst_conn["fan_in"] > 1:
-                # 여러 입력을 받는 노드 (병합)
-                connection_types["merge"].append((src, dst))
-            elif src_conn["fan_out"] > 1:
-                # 여러 출력을 가진 노드 (분기)
-                connection_types["branch"].append((src, dst))
-            else:
-                connection_types["complex"].append((src, dst))
+            connection_types["sequential"].append((src, dst))
         
         return connection_types, node_connections
     
@@ -534,35 +545,37 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
     <style>
     .network-container {
         font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 30px;
-        border-radius: 15px;
+        background: #f8f9fa;
+        padding: 20px;
+        border-radius: 10px;
         margin: 10px 0;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        border: 1px solid #dee2e6;
+        position: relative;
     }
     .layers-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-        gap: 25px;
-        margin: 20px 0;
         position: relative;
-        min-height: 500px;
+        min-height: 400px;
+        width: 100%;
+        height: 400px;
+        z-index: 2;
     }
     .layer {
         background: white;
-        border-radius: 15px;
-        padding: 20px;
+        border-radius: 12px;
+        padding: 15px;
         text-align: center;
-        position: relative;
-        box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        position: absolute;
+        width: 220px;
+        box-shadow: 0 6px 20px rgba(0,0,0,0.15);
         transition: all 0.3s ease;
-        border-left: 5px solid;
-        min-height: 160px;
+        border-left: 4px solid;
+        min-height: 120px;
         display: flex;
         flex-direction: column;
         justify-content: center;
         cursor: pointer;
         user-select: none;
+        z-index: 10;
     }
     
     /* Input/Output 노드를 더 작고 컴팩트하게 만들기 */
@@ -602,20 +615,13 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
         font-size: 9px;
         padding: 3px 6px;
     }
+
     .layer:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 15px 40px rgba(0,0,0,0.25);
+        transform: translateY(-2px) scale(1.01);
+        box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        z-index: 15;
     }
-    .layer.connection-source {
-        border: 3px solid #28a745;
-        box-shadow: 0 0 25px rgba(40, 167, 69, 0.6);
-        transform: scale(1.05);
-    }
-    .layer.connection-target {
-        border: 3px solid #007bff;
-        box-shadow: 0 0 25px rgba(0, 123, 255, 0.6);
-        transform: scale(1.05);
-    }
+
     .layer-header {
         display: flex;
         align-items: center;
@@ -666,12 +672,8 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
         color: white;
         font-weight: bold;
         text-transform: uppercase;
+        background-color: #28a745;
     }
-    .connection-badge.sequential { background-color: #28a745; }
-    .connection-badge.skip { background-color: #ffc107; }
-    .connection-badge.branch { background-color: #17a2b8; }
-    .connection-badge.merge { background-color: #e83e8c; }
-    .connection-badge.complex { background-color: #6f42c1; }
     
     .category-badge {
         position: absolute;
@@ -703,45 +705,23 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
         width: 100%;
         height: 100%;
         pointer-events: none;
-        z-index: 1;
+        z-index: 5;
     }
     .connection-line {
-        stroke-width: 5;
+        stroke-width: 4;
         fill: none;
-        opacity: 0.95;
+        opacity: 0.9;
         marker-end: url(#arrowhead);
-        filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
     }
     .connection-line.sequential {
         stroke: #28a745;
         stroke-dasharray: none;
     }
-    .connection-line.skip {
-        stroke: #ffc107;
-        stroke-dasharray: 10,5;
-        stroke-width: 6;
-    }
-    .connection-line.branch {
-        stroke: #17a2b8;
-        stroke-dasharray: 5,5;
-    }
-    .connection-line.merge {
-        stroke: #e83e8c;
-        stroke-dasharray: 15,5;
-    }
-    .connection-line.complex {
-        stroke: #6f42c1;
-        stroke-dasharray: 20,10,5,10;
-    }
     
-    /* 연결선 hover 효과 개선 */
+    /* 연결선 hover 효과 */
     .connection-line:hover {
         stroke-width: 7;
         opacity: 1;
-        filter: drop-shadow(0 3px 6px rgba(0,0,0,0.4));
-    }
-    .connection-line.skip:hover {
-        stroke-width: 8;
     }
     
     .layer {
@@ -750,132 +730,51 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
     }
     
     .connection-instructions {
-        background: rgba(255, 255, 255, 0.95);
-        border-radius: 12px;
-        padding: 20px;
-        margin: 20px 0;
+        background: rgba(255, 255, 255, 0.9);
+        border-radius: 8px;
+        padding: 15px;
+        margin: 15px 0;
         text-align: center;
-        border: 2px dashed #667eea;
+        border: 1px solid #dee2e6;
     }
     .connection-instructions h4 {
-        color: #667eea;
-        margin: 0 0 15px 0;
-        font-size: 18px;
+        color: #495057;
+        margin: 0 0 10px 0;
+        font-size: 16px;
     }
     .connection-instructions p {
-        margin: 8px 0;
-        font-size: 14px;
+        margin: 5px 0;
+        font-size: 13px;
         color: #6c757d;
     }
     
     .connection-stats {
         background: rgba(255, 255, 255, 0.9);
-        border-radius: 12px;
-        padding: 20px;
-        margin: 20px 0;
+        border-radius: 8px;
+        padding: 15px;
+        margin: 15px 0;
         text-align: center;
+        border: 1px solid #dee2e6;
     }
     .connection-stats h4 {
-        color: #667eea;
-        margin: 0 0 15px 0;
+        color: #495057;
+        margin: 0 0 10px 0;
     }
-    .stats-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-        gap: 15px;
-        margin-top: 15px;
-    }
-    .stat-item {
-        background: #f8f9fa;
-        padding: 12px;
+    
+    .connection-info {
+        background: rgba(255, 255, 255, 0.9);
         border-radius: 8px;
-        border-left: 4px solid #667eea;
-    }
-    .stat-label {
-        font-size: 12px;
-        color: #6c757d;
-        text-transform: uppercase;
-        font-weight: bold;
-    }
-    .stat-value {
-        font-size: 18px;
-        font-weight: bold;
-        color: #667eea;
-        margin-top: 5px;
-    }
-    
-    .warning {
-        background: #fff3cd;
-        border: 1px solid #ffeaa7;
-        border-radius: 10px;
         padding: 15px;
-        margin: 20px 0;
-        color: #856404;
+        margin: 15px 0;
+        text-align: center;
+        border: 1px solid #dee2e6;
+    }
+    .connection-info h5 {
+        color: #495057;
+        margin: 0 0 10px 0;
     }
     
-    .residual-highlight {
-        background: linear-gradient(45deg, #ffc107, #ff8c00);
-        color: white;
-        border: none;
-        box-shadow: 0 0 20px rgba(255, 193, 7, 0.3);
-    }
-    
-    .skip-connection {
-        position: relative;
-    }
-    .skip-connection::before {
-        content: '';
-        position: absolute;
-        top: -10px;
-        left: -10px;
-        right: -10px;
-        bottom: -10px;
-        border: 2px dashed #ffc107;
-        border-radius: 20px;
-        opacity: 0.5;
-        pointer-events: none;
-    }
-    
-    .skip-source {
-        position: relative;
-    }
-    .skip-source::after {
-        content: '⏭️';
-        position: absolute;
-        top: -5px;
-        right: -5px;
-        background: #ffc107;
-        color: white;
-        border-radius: 50%;
-        width: 20px;
-        height: 20px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 10px;
-        box-shadow: 0 2px 5px rgba(255, 193, 7, 0.5);
-    }
-    
-    /* 화살표 드래그 연결 시스템 */
-    .drawing-arrow {
-        stroke: #ff6b6b;
-        stroke-width: 5;
-        stroke-dasharray: 8,8;
-        fill: none;
-        pointer-events: all;
-        cursor: crosshair;
-        filter: drop-shadow(0 2px 4px rgba(255, 107, 107, 0.4));
-    }
-    
-    .arrow-preview {
-        stroke: #ff6b6b;
-        stroke-width: 4;
-        stroke-dasharray: 6,6;
-        fill: none;
-        opacity: 0.9;
-        pointer-events: none;
-        filter: drop-shadow(0 2px 4px rgba(255, 107, 107, 0.3));
-    }
+
     
     .connection-point {
         fill: #667eea;
@@ -886,123 +785,34 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
     }
     .connection-point:hover {
         fill: #ff6b6b;
-        transform: scale(1.3);
-        stroke-width: 3;
+        transform: scale(1.2);
     }
-    .connection-point.active {
-        fill: #ff6b6b;
-        stroke: #ff6b6b;
-        stroke-width: 3;
-    }
-    
-    .drawing-mode {
-        background: rgba(255, 107, 107, 0.1);
-        border: 2px dashed #ff6b6b;
-    }
-    
-    .connection-toolbar {
-        background: rgba(255, 255, 255, 0.95);
-        border-radius: 10px;
-        padding: 15px;
-        margin: 20px 0;
-        text-align: center;
-        border: 2px solid #667eea;
-    }
-    .connection-toolbar h5 {
-        color: #667eea;
-        margin: 0 0 10px 0;
-        font-size: 16px;
-    }
-    .toolbar-buttons {
-        display: flex;
-        justify-content: center;
-        gap: 10px;
-        flex-wrap: wrap;
-    }
-    .toolbar-btn {
-        padding: 8px 16px;
-        border: none;
-        border-radius: 6px;
-        cursor: pointer;
-        font-size: 12px;
-        font-weight: bold;
-        transition: all 0.2s ease;
-    }
-    .toolbar-btn.active {
-        transform: scale(1.05);
-        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-    }
-    .toolbar-btn.sequential { background: #28a745; color: white; }
-    .toolbar-btn.skip { background: #ffc107; color: white; }
-    .toolbar-btn.branch { background: #17a2b8; color: white; }
-    .toolbar-btn.merge { background: #e83e8c; color: white; }
-    .toolbar-btn.cancel { background: #6c757d; color: white; }
     </style>
     <div class="network-container">
     """
     
-    # 연결 안내 메시지
+    # 간단한 안내 메시지
     html += """
     <div class="connection-instructions">
-        <h4>🎯 화살표 드래그 연결 시스템</h4>
-        <p>• <strong>드래그 연결</strong>: 레이어를 드래그하여 화살표로 연결</p>
-        <p>• <strong>연결 타입 선택</strong>: 연결 전에 타입을 선택하여 시각적 구분</p>
-        <p>• <strong>실시간 미리보기</strong>: 드래그 중인 화살표를 실시간으로 확인</p>
-        <p>• <strong>ESC 취소</strong>: ESC 키로 연결 작업 취소</p>
+        <h4>🎯 네트워크 시각화</h4>
+        <p>• 노드들이 그리드 형태로 배치됩니다</p>
+        <p>• 연결선으로 노드 간 관계를 표시합니다</p>
     </div>
     """
     
-    # 연결 도구 모음
+    # 간단한 연결 정보
     html += """
-    <div class="connection-toolbar">
-        <h5>🔗 연결 도구</h5>
-        <div class="toolbar-buttons">
-            <button class="toolbar-btn sequential active" onclick="setConnectionType('sequential')">순차 연결</button>
-            <button class="toolbar-btn skip" onclick="setConnectionType('skip')">스킵 커넥션</button>
-            <button class="toolbar-btn branch" onclick="setConnectionType('branch')">분기 연결</button>
-            <button class="toolbar-btn merge" onclick="setConnectionType('merge')">병합 연결</button>
-            <button class="toolbar-btn cancel" onclick="cancelDrawing()">취소</button>
-        </div>
+    <div class="connection-info">
+        <h5>🔗 연결 정보</h5>
+        <p>총 연결 수: """ + str(len(edges)) + """</p>
     </div>
     """
     
-    # 연결 통계 표시
-    total_edges = len(edges)
-    sequential_count = len(connection_types["sequential"])
-    skip_count = len(connection_types["skip"])
-    branch_count = len(connection_types["branch"])
-    merge_count = len(connection_types["merge"])
-    complex_count = len(connection_types["complex"])
-    
+    # 간단한 연결 통계
     html += f"""
     <div class="connection-stats">
-        <h4>📊 연결 분석 (향상된 시스템)</h4>
-        <div class="stats-grid">
-            <div class="stat-item">
-                <div class="stat-label">총 연결</div>
-                <div class="stat-value">{total_edges}</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-label">순차 연결</div>
-                <div class="stat-value">{sequential_count}</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-label">스킵 커넥션</div>
-                <div class="stat-value">{skip_count}</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-label">분기</div>
-                <div class="stat-value">{branch_count}</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-label">병합</div>
-                <div class="stat-value">{merge_count}</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-label">복잡한 연결</div>
-                <div class="stat-value">{complex_count}</div>
-            </div>
-        </div>
+        <h4>📊 연결 통계</h4>
+        <p>총 연결 수: {len(edges)}</p>
     </div>
     """
     
@@ -1011,27 +821,11 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
     
     # SVG 연결선을 위한 컨테이너
     html += '''
-    <svg class="connection-lines" xmlns="http://www.w3.org/2000/svg">
+    <svg class="connection-lines" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" preserveAspectRatio="xMidYMid meet">
         <defs>
-            <marker id="arrowhead" markerWidth="18" markerHeight="12" 
-                    refX="17" refY="6" orient="auto">
-                <polygon points="0 0, 18 6, 0 12" fill="#667eea" />
-            </marker>
-            <marker id="arrowhead-sequential" markerWidth="18" markerHeight="12" 
-                    refX="17" refY="6" orient="auto">
-                <polygon points="0 0, 18 6, 0 12" fill="#28a745" />
-            </marker>
-            <marker id="arrowhead-skip" markerWidth="20" markerHeight="14" 
-                    refX="19" refY="7" orient="auto">
-                <polygon points="0 0, 20 7, 0 14" fill="#ffc107" />
-            </marker>
-            <marker id="arrowhead-branch" markerWidth="18" markerHeight="12" 
-                    refX="17" refY="6" orient="auto">
-                <polygon points="0 0, 18 6, 0 12" fill="#17a2b8" />
-            </marker>
-            <marker id="arrowhead-merge" markerWidth="18" markerHeight="12" 
-                    refX="17" refY="6" orient="auto">
-                <polygon points="0 0, 18 6, 0 12" fill="#e83e8c" />
+            <marker id="arrowhead" markerWidth="15" markerHeight="10" 
+                    refX="14" refY="5" orient="auto">
+                <polygon points="0 0, 15 5, 0 10" fill="#28a745" />
             </marker>
         </defs>
     '''
@@ -1072,62 +866,41 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
         category_name = NODE_SPECS[node_type]["category"]
         icon = NODE_SPECS[node_type]["icon"]
         
-        # 연결 정보 분석
+        # 연결 정보 분석 (단순화)
         conn_info = node_connections[node_id]
         connection_info = f"입력: {conn_info['fan_in']}개, 출력: {conn_info['fan_out']}개"
         
-        # 연결 타입 결정
+        # 연결 타입 결정 (단순화)
         connection_type = "sequential"
-        if conn_info["fan_in"] > 1:
-            connection_type = "merge"
-        elif conn_info["fan_out"] > 1:
-            connection_type = "branch"
         
-        # ResNet 스타일 노드 감지 (개선된 로직)
-        is_residual = node_type == "ResidualBlock" or node_type == "Add"
-        is_skip_connection = False
+        # 노드 위치 계산 (간단한 그리드 레이아웃)
+        # 안전하고 예측 가능한 위치 계산
+        node_index = next(i for i, n in enumerate(nodes) if n["id"] == node_id)
+        grid_col = node_index % 3  # 3열 그리드
+        grid_row = node_index // 3  # 행
         
-        # Add 노드이거나 여러 입력을 받는 노드인 경우 스킵 커넥션으로 간주
-        if node_type == "Add" or conn_info["fan_in"] > 1:
-            is_skip_connection = True
+        # 안전한 범위 내에서 위치 계산
+        X_STEP, Y_STEP = 250, 150
+        x_pos = grid_col * X_STEP + 100
+        y_pos = grid_row * Y_STEP + 80
         
-        # 스킵 커넥션의 시작점도 감지
-        is_skip_source = False
-        if conn_info["fan_out"] > 1:
-            # 여러 출력을 가진 노드 중 Add 노드로 연결되는 경우
-            for dst in conn_info["outgoing"]:
-                dst_node = next((n for n in nodes if n["id"] == dst), None)
-                if dst_node and dst_node["type"] == "Add":
-                    is_skip_source = True
-                    break
-        
-        # 노드 위치 계산 (개선된 그리드 레이아웃)
-        grid_col = i % 3
-        grid_row = i // 3
-        x_pos = grid_col * 320 + 160
-        y_pos = grid_row * 220 + 120
+        # 위치가 안전한 범위 내에 있도록 제한
+        x_pos = max(80, min(x_pos, 800))
+        y_pos = max(80, min(y_pos, 400))
         
         node_positions[node_id] = (x_pos, y_pos)
         
-        # 특별한 스타일 클래스 추가
+        # 간단한 스타일 클래스
         extra_classes = []
-        if is_residual:
-            extra_classes.append("residual-highlight")
-        if is_skip_connection:
-            extra_classes.append("skip-connection")
-        if is_skip_source:
-            extra_classes.append("skip-source")
-        
-        # Input/Output 노드에 io-node 클래스 추가
         if node_type in ["Input", "Output"]:
             extra_classes.append("io-node")
         
         extra_class_str = " " + " ".join(extra_classes) if extra_classes else ""
         
         html += f"""
-        <div class="layer{extra_class_str}" style="border-left-color: {category_color};" data-node-id="{node_id}" data-node-type="{node_type}">
+        <div class="layer{extra_class_str}" style="border-left-color: {category_color}; position: absolute; left: {x_pos}px; top: {y_pos}px;" data-node-id="{node_id}" data-node-type="{node_type}">
             <div class="category-badge" style="background-color: {category_color};">{category_name}</div>
-            <div class="connection-badge {connection_type}">{connection_type}</div>
+            <div class="connection-badge">{connection_type}</div>
             <div class="layer-header">
                 <div class="layer-icon">{icon}</div>
                 <div class="layer-name">{node_type}</div>
@@ -1139,253 +912,83 @@ def create_network_diagram(nodes: List[dict], edges: List[List[str]], tensor_sha
         </div>
         """
         
-        # 연결점 추가 (입력/출력 포인트) - io-node의 경우 위치 조정
-        if node_type in ["Input", "Output"]:
-            # io-node는 더 작으므로 연결점 위치 조정
-            output_cy = y_pos + 60  # 더 위쪽으로
-            input_cy = y_pos + 60
-        else:
-            output_cy = y_pos + 80
-            input_cy = y_pos + 80
+        # 연결점 추가 (단순화)
+        output_cy = y_pos + 60
+        input_cy = y_pos + 60
+        output_cx = x_pos + 110
+        input_cx = x_pos - 110
         
         html += f'''
-        <circle class="connection-point" cx="{x_pos + 140}" cy="{output_cy}" r="6" data-node-id="{node_id}" data-point-type="output" />
-        <circle class="connection-point" cx="{x_pos - 140}" cy="{input_cy}" r="6" data-node-id="{node_id}" data-point-type="input" />
+        <circle class="connection-point" cx="{output_cx}" cy="{output_cy}" r="6" data-node-id="{node_id}" data-point-type="output" />
+        <circle class="connection-point" cx="{input_cx}" cy="{input_cy}" r="6" data-node-id="{node_id}" data-point-type="input" />
         '''
     
-    # 연결선 그리기 (개선된 스타일링)
+    # 연결선 그리기 (단순화)
+    
     for src, dst in edges:
         if src in node_positions and dst in node_positions:
             x1, y1 = node_positions[src]
             x2, y2 = node_positions[dst]
             
-            # 연결 타입 결정
+            # 연결선 시작점과 끝점을 노드의 연결점으로 조정 (더 안전한 범위)
+            # 출력 연결점 (오른쪽)
+            x1 = x1 + 110
+            # 입력 연결점 (왼쪽)
+            x2 = x2 - 110
+            
+            # 연결 타입 결정 (단순화)
             line_type = "sequential"
-            if (src, dst) in connection_types["skip"]:
-                line_type = "skip"
-            elif (src, dst) in connection_types["branch"]:
-                line_type = "branch"
-            elif (src, dst) in connection_types["merge"]:
-                line_type = "merge"
-            elif (src, dst) in connection_types["complex"]:
-                line_type = "complex"
             
-            # 곡선 연결선 (더 부드러운 베지어 곡선)
-            mid_x = (x1 + x2) / 2
-            mid_y = (y1 + y2) / 2
+            # 간단한 스타일
+            stroke_w = "4"
+            opacity = "0.9"
             
-            # 스킵 커넥션의 경우 더 곡선적인 경로
-            if line_type == "skip":
-                # 더 긴 곡선 경로 (베지어 곡선)
-                ctrl1_x = x1 + (x2 - x1) * 0.4
-                ctrl1_y = y1 - 50  # 위로 올라가는 곡선
-                ctrl2_x = x2 - (x2 - x1) * 0.4
-                ctrl2_y = y2 - 50
-                path_d = f"M {x1} {y1} C {ctrl1_x} {ctrl1_y}, {ctrl2_x} {ctrl2_y}, {x2} {y2}"
-            elif line_type == "branch":
-                # 분기 연결은 더 짧은 곡선
-                ctrl_x = x1 + (x2 - x1) * 0.2
-                ctrl_y = y1 + (y2 - y1) * 0.2
-                path_d = f"M {x1} {y1} Q {ctrl_x} {ctrl_y} {x2} {y2}"
-            elif line_type == "merge":
-                # 병합 연결은 더 긴 곡선
-                ctrl_x = x1 + (x2 - x1) * 0.6
-                ctrl_y = y1 + (y2 - y1) * 0.6
-                path_d = f"M {x1} {y1} Q {ctrl_x} {ctrl_y} {x2} {y2}"
-            else:
-                # 일반적인 곡선
-                path_d = f"M {x1} {y1} Q {mid_x} {y1} {mid_x} {mid_y} T {x2} {y2}"
+            # 간단한 직선 연결선 (안전한 기본값)
+            path_d = f"M {x1} {y1} L {x2} {y2}"
             
             html += f'''
             <path class="connection-line {line_type}" 
                   d="{path_d}"
-                  marker-end="url(#arrowhead-{line_type})" />
+                  style="stroke-width:{stroke_w};opacity:{opacity}"
+                  marker-end="url(#arrowhead)" />
             '''
     
     html += "</svg></div>"
     
-    # JavaScript for 화살표 드래그 연결 시스템
+    # 간단한 JavaScript (안전한 버전)
     html += """
     <script>
-    let isDrawing = false;
-    let drawingStartPoint = null;
-    let currentConnectionType = 'sequential';
-    let drawingArrow = null;
-    let previewArrow = null;
+    console.log('Network diagram loaded successfully');
     
-    // 연결 타입 설정
-    function setConnectionType(type) {
-        currentConnectionType = type;
-        
-        // 버튼 활성화 상태 업데이트
-        document.querySelectorAll('.toolbar-btn').forEach(btn => {
-            btn.classList.remove('active');
-        });
-        event.target.classList.add('active');
-        
-        console.log('Connection type set to:', type);
-    }
-    
-    // 연결점 클릭 이벤트
+    // 연결점 hover 효과
     document.addEventListener('DOMContentLoaded', function() {
         const connectionPoints = document.querySelectorAll('.connection-point');
         
         connectionPoints.forEach(point => {
-            point.addEventListener('mousedown', startDrawing);
-            point.addEventListener('mouseenter', highlightPoint);
-            point.addEventListener('mouseleave', unhighlightPoint);
-        });
-        
-        // 마우스 이동 이벤트
-        document.addEventListener('mousemove', updateDrawing);
-        document.addEventListener('mouseup', endDrawing);
-        
-        // ESC 키로 취소
-        document.addEventListener('keydown', function(event) {
-            if (event.key === 'Escape') {
-                cancelDrawing();
-            }
+            point.addEventListener('mouseenter', function() {
+                this.style.fill = '#ff6b6b';
+                this.style.transform = 'scale(1.2)';
+            });
+            
+            point.addEventListener('mouseleave', function() {
+                this.style.fill = '#667eea';
+                this.style.transform = 'scale(1)';
+            });
         });
     });
-    
-    function startDrawing(event) {
-        if (event.target.dataset.pointType === 'output') {
-            isDrawing = true;
-            drawingStartPoint = {
-                x: event.clientX,
-                y: event.clientY,
-                nodeId: event.target.dataset.nodeId
-            };
-            
-            // 드래그 시작 시각적 피드백
-            event.target.classList.add('active');
-            
-            // 미리보기 화살표 생성
-            const svg = document.querySelector('.connection-lines');
-            previewArrow = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-            previewArrow.setAttribute('class', 'arrow-preview');
-            previewArrow.setAttribute('marker-end', `url(#arrowhead-${currentConnectionType})`);
-            svg.appendChild(previewArrow);
-            
-            console.log('Started drawing from:', drawingStartPoint.nodeId);
-        }
-    }
-    
-    function updateDrawing(event) {
-        if (isDrawing && previewArrow) {
-            const startX = drawingStartPoint.x;
-            const startY = drawingStartPoint.y;
-            const endX = event.clientX;
-            const endY = event.clientY;
-            
-            // 곡선 경로 계산
-            const midX = (startX + endX) / 2;
-            const midY = (startY + endY) / 2;
-            
-            let pathD;
-            if (currentConnectionType === 'skip') {
-                // 스킵 커넥션은 더 곡선적인 경로
-                const ctrl1X = startX + (endX - startX) * 0.4;
-                const ctrl1Y = startY - 50;
-                const ctrl2X = endX - (endX - startX) * 0.4;
-                const ctrl2Y = endY - 50;
-                pathD = `M ${startX} ${startY} C ${ctrl1X} ${ctrl1Y}, ${ctrl2X} ${ctrl2Y}, ${endX} ${endY}`;
-            } else {
-                // 일반적인 곡선
-                pathD = `M ${startX} ${startY} Q ${midX} ${startY} ${midX} ${midY} T ${endX} ${endY}`;
-            }
-            
-            previewArrow.setAttribute('d', pathD);
-        }
-    }
-    
-    function endDrawing(event) {
-        if (isDrawing) {
-            const targetPoint = event.target;
-            
-            if (targetPoint.classList.contains('connection-point') && 
-                targetPoint.dataset.pointType === 'input' &&
-                targetPoint.dataset.nodeId !== drawingStartPoint.nodeId) {
-                
-                // 연결 생성
-                const sourceNodeId = drawingStartPoint.nodeId;
-                const targetNodeId = targetPoint.dataset.nodeId;
-                
-                console.log('Creating connection:', sourceNodeId, '->', targetNodeId, 'type:', currentConnectionType);
-                
-                // Streamlit에 연결 정보 전송
-                if (window.parent && window.parent.postMessage) {
-                    window.parent.postMessage({
-                        type: 'add_connection',
-                        source: sourceNodeId,
-                        target: targetNodeId,
-                        mode: currentConnectionType
-                    }, '*');
-                }
-                
-                // 성공적인 연결 시각적 피드백
-                targetPoint.classList.add('active');
-                setTimeout(() => {
-                    targetPoint.classList.remove('active');
-                }, 500);
-            }
-            
-            // 드래그 상태 정리
-            cleanupDrawing();
-        }
-    }
-    
-    function cancelDrawing() {
-        cleanupDrawing();
-        console.log('Drawing cancelled');
-    }
-    
-    function cleanupDrawing() {
-        isDrawing = false;
-        drawingStartPoint = null;
-        
-        // 활성화된 연결점 제거
-        document.querySelectorAll('.connection-point.active').forEach(point => {
-            point.classList.remove('active');
-        });
-        
-        // 미리보기 화살표 제거
-        if (previewArrow) {
-            previewArrow.remove();
-            previewArrow = null;
-        }
-    }
-    
-    function highlightPoint(event) {
-        if (!isDrawing) {
-            event.target.style.transform = 'scale(1.3)';
-            event.target.style.fill = '#ff6b6b';
-        }
-    }
-    
-    function unhighlightPoint(event) {
-        if (!isDrawing) {
-            event.target.style.transform = '';
-            event.target.style.fill = '';
-        }
-    }
     
     // 레이어 호버 효과
     document.addEventListener('DOMContentLoaded', function() {
         const layers = document.querySelectorAll('.layer');
         layers.forEach(layer => {
             layer.addEventListener('mouseenter', function() {
-                if (!isDrawing) {
-                    this.style.transform = 'translateY(-3px) scale(1.02)';
-                    this.style.boxShadow = '0 15px 40px rgba(0,0,0,0.25)';
-                }
+                this.style.transform = 'translateY(-2px) scale(1.01)';
+                this.style.boxShadow = '0 10px 30px rgba(0,0,0,0.2)';
             });
             
             layer.addEventListener('mouseleave', function() {
-                if (!isDrawing) {
-                    this.style.transform = '';
-                    this.style.boxShadow = '';
-                }
+                this.style.transform = '';
+                this.style.boxShadow = '';
             });
         });
     });
@@ -1743,147 +1346,139 @@ if __name__ == "__main__":
     return header + cls + main
 
 # ---------- 개선된 사이드바: 시각적 팔레트 ----------
-st.sidebar.title("🎨 TorchCanvas — 향상된 Palette")
+st.sidebar.title("🎨 TorchCanvas — Palette")
 
-# 카테고리별 팔레트
-selected_category = st.sidebar.selectbox(
-    "카테고리 선택",
-    list(CATEGORIES.keys()),
-    format_func=lambda x: CATEGORIES[x],
-    index=0
-)
+# 간단한 설정
+compact = True
+collapse_composites = True
+focus_path = []
 
-# 선택된 카테고리의 블록들 표시
-st.sidebar.subheader(f"📂 {CATEGORIES[selected_category]} (향상된 블록)")
+st.sidebar.divider()
 
-# 카테고리별 블록들을 시각적으로 표시
-category_blocks = [name for name, spec in NODE_SPECS.items() if spec["category"] == selected_category]
+# 간단한 블록 추가
+st.sidebar.subheader("📂 블록 추가")
 
-for block_name in category_blocks:
-    block_spec = NODE_SPECS[block_name]
-    
-    # 블록 카드 스타일
-    with st.sidebar.container():
-        col1, col2 = st.columns([1, 4])
-        with col1:
-            st.markdown(f"<div style='text-align: center; font-size: 20px;'>{block_spec['icon']}</div>", unsafe_allow_html=True)
-        with col2:
-            st.markdown(f"**{block_name}**")
-            st.caption(block_spec['description'])
+# 주요 블록들만 표시
+main_blocks = ["Input", "Conv2d", "ReLU", "MaxPool2d", "Linear", "Output"]
+
+for block_name in main_blocks:
+    if st.sidebar.button(f"➕ {block_name}", key=f"add_{block_name}"):
+        # 자동으로 노드 ID 생성
+        base_name = block_name.lower()
+        existing_ids = [n["id"] for n in st.session_state.nodes]
+        counter = 1
+        while f"{base_name}{counter}" in existing_ids:
+            counter += 1
+        nid = f"{base_name}{counter}"
         
-        # 블록 추가 버튼 (향상된 버전)
-        if st.button(f"➕ {block_name} 추가", key=f"add_{block_name}"):
-            # 자동으로 노드 ID 생성
-            base_name = block_name.lower()
-            existing_ids = [n["id"] for n in st.session_state.nodes]
-            counter = 1
-            while f"{base_name}{counter}" in existing_ids:
-                counter += 1
-            nid = f"{base_name}{counter}"
-            
-            # 기본 파라미터로 노드 추가
-            params = {}
-            for k, spec in block_spec["params"].items():
+        # 기본 파라미터로 노드 추가
+        params = {}
+        if block_name in NODE_SPECS:
+            for k, spec in NODE_SPECS[block_name]["params"].items():
                 if isinstance(spec, tuple):
                     typ, default = spec
                     if typ == int:
                         params[k] = default if default is not None else 1
-                    elif typ == float:
-                        params[k] = float(default) if default is not None else 0.5
-                    elif typ == bool:
-                        params[k] = bool(default) if default is not None else False
                     else:
                         params[k] = default
                 elif spec == int:
-                    params[k] = 64  # 기본값
-                elif spec == float:
-                    params[k] = 0.5
-                elif spec == bool:
-                    params[k] = True
-                elif spec == "same_or_int":
-                    params[k] = "same"
+                    params[k] = 64
                 else:
                     params[k] = spec
-            
-            st.session_state.nodes.append({"id": nid, "type": block_name, "params": params})
-            st.rerun()
         
-        st.sidebar.divider()
+        st.session_state.nodes.append({"id": nid, "type": block_name, "params": params})
+        st.rerun()
 
-# 고급 설정 (접을 수 있는 섹션)
-with st.sidebar.expander("⚙️ 고급 설정 (향상된 기능)"):
-    st.subheader("수동 노드 추가")
-    with st.form("manual_add_node_form"):
-        nid = st.text_input("노드 ID", placeholder="예: conv1")
-        ntype = st.selectbox("노드 타입", list(NODE_SPECS.keys()), index=0)
-        params_spec = NODE_SPECS[ntype]["params"]
-        params = {}
-        for k, spec in params_spec.items():
-            if spec == int:
-                params[k] = st.number_input(k, value=1, step=1)
-            elif spec == float:
-                params[k] = st.number_input(k, value=0.5, step=0.1, format="%.4f")
-            elif spec == bool:
-                params[k] = st.checkbox(k, value=False)
-            elif spec == "same_or_int":
-                mode = st.selectbox(k, ["same", "int"], index=0)
-                params[k] = "same" if mode == "same" else int(st.number_input(f"{k} (int)", value=1, step=1))
-            elif isinstance(spec, tuple):
-                typ, default = spec
-                if typ == int:
-                    val = st.number_input(k, value=default if default is not None else 0, step=1)
-                    params[k] = int(val) if default is not None else (None if val==0 else int(val))
-                elif typ == float:
-                    params[k] = float(st.number_input(k, value=float(default)))
-                elif typ == bool:
-                    params[k] = st.checkbox(k, value=bool(default))
-                else:
-                    params[k] = default
-            elif isinstance(spec, list):  # enum
-                default = NODE_SPECS[ntype]["params"][k][1] if isinstance(NODE_SPECS[ntype]["params"][k], tuple) else spec[0]
-                params[k] = st.selectbox(k, spec, index=spec.index(default) if default in spec else 0)
+# 간단한 수동 노드 추가
+st.sidebar.subheader("⚙️ 수동 노드 추가")
+with st.form("manual_add_node_form"):
+    nid = st.text_input("노드 ID", placeholder="예: conv1")
+    ntype = st.selectbox("노드 타입", list(NODE_SPECS.keys()), index=0)
+    params_spec = NODE_SPECS[ntype]["params"]
+    params = {}
+    for k, spec in params_spec.items():
+        if spec == int:
+            params[k] = st.number_input(k, value=1, step=1)
+        elif spec == bool:
+            params[k] = st.checkbox(k, value=False)
+        elif spec == "same_or_int":
+            mode = st.selectbox(k, ["same", "int"], index=0)
+            params[k] = "same" if mode == "same" else int(st.number_input(f"{k} (int)", value=1, step=1))
+        elif isinstance(spec, tuple):
+            typ, default = spec
+            if typ == int:
+                val = st.number_input(k, value=default if default is not None else 0, step=1)
+                params[k] = int(val) if default is not None else (None if val==0 else int(val))
+            elif typ == float:
+                params[k] = float(st.number_input(k, value=float(default)))
+            elif typ == bool:
+                params[k] = st.checkbox(k, value=bool(default))
             else:
-                params[k] = st.text_input(k, value=str(spec))
-        add = st.form_submit_button("수동 추가")
-        if add:
-            assert nid, "노드 ID는 필수"
-            st.session_state.nodes.append({"id": nid, "type": ntype, "params": params})
-            st.rerun()
+                params[k] = default
+        elif isinstance(spec, list):  # enum
+            default = NODE_SPECS[ntype]["params"][k][1] if isinstance(NODE_SPECS[ntype]["params"][k], tuple) else spec[0]
+            params[k] = st.selectbox(k, spec, index=spec.index(default) if default in spec else 0)
+        else:
+            params[k] = st.text_input(k, value=str(spec))
+    add = st.form_submit_button("수동 추가")
+    if add:
+        assert nid, "노드 ID는 필수"
+        st.session_state.nodes.append({"id": nid, "type": ntype, "params": params})
+        st.rerun()
 
 # ---------- 사이드바: 엣지/입출력 ----------
-st.sidebar.subheader("🔗 연결 관리 (향상된 시스템)")
+st.sidebar.subheader("🔗 연결 관리")
 if st.session_state.nodes:
     opts = [n["id"] for n in st.session_state.nodes]
     with st.sidebar.form("add_edge_form"):
-        src = st.selectbox("src", opts)
-        dst = st.selectbox("dst", opts)
-        add_e = st.form_submit_button("엣지 추가")
+        src = st.selectbox("출발 노드", opts)
+        dst = st.selectbox("도착 노드", opts)
+        add_e = st.form_submit_button("연결 추가")
         if add_e:
-            st.session_state.edges.append([src, dst]); st.rerun()
+            st.session_state.edges.append([src, dst])
+            st.rerun()
 
 st.sidebar.divider()
-st.sidebar.subheader("📥📤 입력/출력 설정 (향상된 시스템)")
+st.sidebar.subheader("📥📤 입력/출력 설정")
 all_ids = [n["id"] for n in st.session_state.nodes]
-st.session_state.inputs = st.sidebar.multiselect("inputs", all_ids, default=st.session_state.inputs)
-st.session_state.outputs = st.sidebar.multiselect("outputs", all_ids, default=st.session_state.outputs)
+st.session_state.inputs = st.sidebar.multiselect("입력 노드", all_ids, default=st.session_state.inputs)
+st.session_state.outputs = st.sidebar.multiselect("출력 노드", all_ids, default=st.session_state.outputs)
 
 st.sidebar.divider()
-if st.sidebar.button("🔄 그래프 초기화 (향상된 시스템)"):
-    st.session_state.nodes.clear(); st.session_state.edges.clear()
-    st.session_state.inputs.clear(); st.session_state.outputs.clear()
+if st.sidebar.button("🔄 그래프 초기화"):
+    st.session_state.nodes.clear()
+    st.session_state.edges.clear()
+    st.session_state.inputs.clear()
+    st.session_state.outputs.clear()
     st.session_state.tensor_shapes.clear()
     st.rerun()
 
 # ---------- 메인: 탭 기반 인터페이스 ----------
-st.title("TorchCanvas — 향상된 시각적 신경망 디자이너")
+st.title("TorchCanvas — 신경망 디자이너")
+
+# 기본값 설정 (사이드바가 아직 렌더링되지 않은 경우)
+try:
+    compact
+except NameError:
+    compact = True
+
+try:
+    collapse_composites
+except NameError:
+    collapse_composites = True
+
+try:
+    focus_path
+except NameError:
+    focus_path = []
 
 # 탭 생성
-tab1, tab2, tab3, tab4 = st.tabs(["🎨 네트워크 시각화 (향상됨)", "⚙️ 코드 생성", "📊 상세 정보", "📋 템플릿"])
+tab1, tab2, tab3, tab4 = st.tabs(["🎨 네트워크 시각화", "⚙️ 코드 생성", "📊 상세 정보", "📋 템플릿"])
 
 with tab1:
     # 네트워크 다이어그램 표시 (더 큰 크기)
     if st.session_state.nodes:
-        st.subheader("🔍 네트워크 아키텍처 시각화 (향상된 연결 시스템)")
+        st.subheader("🔍 네트워크 아키텍처 시각화")
         
         # 모델 통계 계산
         model_stats = calculate_model_statistics(
@@ -1918,15 +1513,36 @@ with tab1:
                 st.error(issue)
         
         # 더 큰 다이어그램 (개선된 버전 사용)
-        diagram_html = create_network_diagram(
-            st.session_state.nodes, 
-            st.session_state.edges, 
-            st.session_state.tensor_shapes
-        )
-        st.components.v1.html(diagram_html, height=600, scrolling=True)
+        try:
+            # 디버깅 정보 추가
+            st.write("🔍 디버깅 정보:")
+            st.write(f"- 노드 수: {len(st.session_state.nodes)}")
+            st.write(f"- 연결 수: {len(st.session_state.edges)}")
+            st.write(f"- 노드 ID들: {[n['id'] for n in st.session_state.nodes]}")
+            st.write(f"- 연결들: {st.session_state.edges}")
+            st.write(f"- compact: {compact}")
+            st.write(f"- collapse_composites: {collapse_composites}")
+            st.write(f"- focus_path: {focus_path}")
+            
+            diagram_html = create_network_diagram(
+                st.session_state.nodes, 
+                st.session_state.edges, 
+                st.session_state.tensor_shapes,
+                compact=compact,
+                collapse_composites=collapse_composites,
+                focus_path=focus_path
+            )
+            st.components.v1.html(diagram_html, height=600, scrolling=True)
+        except Exception as e:
+            st.error(f"다이어그램 생성 중 오류 발생: {str(e)}")
+            import traceback
+            st.code(traceback.format_exc())
+            st.write("노드 수:", len(st.session_state.nodes))
+            st.write("연결 수:", len(st.session_state.edges))
+            st.write("노드들:", [n["id"] for n in st.session_state.nodes])
         
         # 빠른 편집 옵션
-        st.subheader("🔧 빠른 편집 (향상된 인터페이스)")
+        st.subheader("🔧 빠른 편집")
         colA, colB, colC = st.columns(3)
         
         with colA:
@@ -1970,11 +1586,11 @@ with tab1:
                 
                 removed_count = len(st.session_state.edges) - len(cleaned_edges)
                 st.session_state.edges = cleaned_edges
-                st.success(f"{removed_count}개의 의미없는 연결이 제거되었습니다! (향상된 연결 시스템)")
+                st.success(f"{removed_count}개의 의미없는 연결이 제거되었습니다!")
                 st.rerun()
         
         # 자동 연결 기능
-        st.subheader("🔗 향상된 연결 도구 (ResNet 스타일 지원)")
+        st.subheader("🔗 자동 연결 도구")
         colC, colD, colE = st.columns(3)
         
         with colC:
@@ -1992,7 +1608,7 @@ with tab1:
                         if tuple(edge) not in existing_edges:
                             st.session_state.edges.append(edge)
                     
-                    st.success(f"{len(new_edges)}개의 순차 연결이 추가되었습니다! (향상된 연결 시스템)")
+                    st.success(f"{len(new_edges)}개의 순차 연결이 추가되었습니다!")
                     st.rerun()
         
         with colD:
@@ -2036,7 +1652,7 @@ with tab1:
                             st.session_state.edges.append(edge)
                             added_count += 1
                     
-                    st.success(f"{added_count}개의 스마트 연결이 추가되었습니다! (향상된 연결 시스템)")
+                    st.success(f"{added_count}개의 스마트 연결이 추가되었습니다!")
                     st.rerun()
         
         with colE:
