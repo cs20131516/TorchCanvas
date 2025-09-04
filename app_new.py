@@ -264,7 +264,7 @@ def create_visualization_html(nodes: List[Dict], edges: List[List[str]]) -> str:
                 border: 2px dashed #ddd;
                 border-radius: 10px;
                 position: relative;
-                overflow: hidden;
+                overflow: visible;
                 cursor: grab;
             }}
             
@@ -293,6 +293,7 @@ def create_visualization_html(nodes: List[Dict], edges: List[List[str]]) -> str:
                 box-shadow: 0 4px 8px rgba(0,0,0,0.1);
                 transition: all 0.2s ease;
                 border: 2px solid transparent;
+                z-index: 1;
             }}
             
             .node:hover {{
@@ -329,6 +330,9 @@ def create_visualization_html(nodes: List[Dict], edges: List[List[str]]) -> str:
                 stroke-width: 3;
                 fill: none;
                 marker-end: url(#arrowhead);
+                vector-effect: non-scaling-stroke;
+                stroke-linecap: round;
+                shape-rendering: geometricPrecision;
             }}
             
             .connection-line:hover {{
@@ -515,7 +519,7 @@ def create_visualization_html(nodes: List[Dict], edges: List[List[str]]) -> str:
         <!-- 캔버스 컨테이너 -->
         <div class="canvas-container" id="canvasContainer">
             <div class="canvas" id="canvas">
-                <svg style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;">
+                <svg style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 999;">
                     <defs>
                         <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
                             <polygon points="0 0, 10 3.5, 0 7" fill="#666" />
@@ -567,6 +571,26 @@ def create_visualization_html(nodes: List[Dict], edges: List[List[str]]) -> str:
                 renderConnections();
             }
             
+            // 노드 테두리에서 연결점 계산
+            function edgePointOnRect(cx, cy, w, h, tx, ty) {
+                const dx = tx - cx, dy = ty - cy;
+                const absDx = Math.abs(dx), absDy = Math.abs(dy);
+                const halfW = w / 2, halfH = h / 2;
+                
+                // 사각형-중심에서 타겟방향으로 나가는 교차점
+                if (absDx / halfW > absDy / halfH) {
+                    // 좌우 변과 교차
+                    const sx = dx > 0 ? cx + halfW : cx - halfW;
+                    const t = (sx - cx) / dx;
+                    return { x: sx, y: cy + dy * t };
+                } else {
+                    // 상하 변과 교차
+                    const sy = dy > 0 ? cy + halfH : cy - halfH;
+                    const t = (sy - cy) / dy;
+                    return { x: cx + dx * t, y: sy };
+                }
+            }
+            
             // 연결선 렌더링
             function renderConnections() {
                 const svg = document.querySelector('svg');
@@ -579,18 +603,20 @@ def create_visualization_html(nodes: List[Dict], edges: List[List[str]]) -> str:
                         const targetNode = nodes.find(n => n.id === edge[1]);
                         
                         if (sourceNode && targetNode) {
-                            // 노드의 논리적 좌표 사용 (캔버스와 동일한 좌표계)
-                            const sourceX = sourceNode.x + 60; // 노드 중심
-                            const sourceY = sourceNode.y + 40; // 노드 중심
-                            const targetX = targetNode.x + 60; // 노드 중심
-                            const targetY = targetNode.y + 40; // 노드 중심
+                            // 노드 중심 좌표
+                            const sCenter = { x: sourceNode.x + 60, y: sourceNode.y + 40 };
+                            const tCenter = { x: targetNode.x + 60, y: targetNode.y + 40 };
+                            
+                            // 노드 테두리에서의 연결점 계산
+                            const sEdge = edgePointOnRect(sCenter.x, sCenter.y, 120, 80, tCenter.x, tCenter.y);
+                            const tEdge = edgePointOnRect(tCenter.x, tCenter.y, 120, 80, sCenter.x, sCenter.y);
                             
                             const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
                             line.setAttribute('class', 'connection-line');
-                            line.setAttribute('x1', sourceX);
-                            line.setAttribute('y1', sourceY);
-                            line.setAttribute('x2', targetX);
-                            line.setAttribute('y2', targetY);
+                            line.setAttribute('x1', sEdge.x);
+                            line.setAttribute('y1', sEdge.y);
+                            line.setAttribute('x2', tEdge.x);
+                            line.setAttribute('y2', tEdge.y);
                             
                             svg.appendChild(line);
                         }
