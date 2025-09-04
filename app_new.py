@@ -569,31 +569,49 @@ def create_visualization_html(nodes: List[Dict], edges: List[List[str]]) -> str:
                 });
                 
                 renderConnections();
+                updateCanvasSize();
             }
             
-            // 노드 테두리에서 연결점 계산
+            // 캔버스 크기 동적 조정
+            function updateCanvasSize() {
+                const canvas = document.getElementById('canvas');
+                const svg = canvas.querySelector('svg');
+                
+                // 노드가 하나도 없을 때를 대비
+                const minW = canvas.parentElement.clientWidth;
+                const minH = canvas.parentElement.clientHeight;
+                
+                const maxX = nodes.length ? Math.max(...nodes.map(n => n.x)) + 120 : minW;
+                const maxY = nodes.length ? Math.max(...nodes.map(n => n.y)) + 80 : minH;
+                
+                const W = Math.max(maxX, minW);
+                const H = Math.max(maxY, minH);
+                
+                canvas.style.width = W + 'px';
+                canvas.style.height = H + 'px';
+                
+                // SVG 뷰포트와 viewBox를 동일하게 확장
+                svg.setAttribute('width', W);
+                svg.setAttribute('height', H);
+                svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+            }
+            
+            // 노드 테두리에서 연결점 계산 (안정적인 스케일 방식)
             function edgePointOnRect(cx, cy, w, h, tx, ty) {
                 const dx = tx - cx, dy = ty - cy;
-                const absDx = Math.abs(dx), absDy = Math.abs(dy);
                 const halfW = w / 2, halfH = h / 2;
                 
-                // 사각형-중심에서 타겟방향으로 나가는 교차점
-                if (absDx / halfW > absDy / halfH) {
-                    // 좌우 변과 교차
-                    const sx = dx > 0 ? cx + halfW : cx - halfW;
-                    const t = (sx - cx) / dx;
-                    return { x: sx, y: cy + dy * t };
-                } else {
-                    // 상하 변과 교차
-                    const sy = dy > 0 ? cy + halfH : cy - halfH;
-                    const t = (sy - cy) / dy;
-                    return { x: cx + dx * t, y: sy };
-                }
+                // 동일점 안전장치
+                if (dx === 0 && dy === 0) return { x: cx, y: cy };
+                
+                // 가장 먼저 만나는 변까지의 비율 계산 (0으로 나누기 방지)
+                const scale = 1 / Math.max(Math.abs(dx) / halfW, Math.abs(dy) / halfH);
+                return { x: cx + dx * scale, y: cy + dy * scale };
             }
             
             // 연결선 렌더링
             function renderConnections() {
-                const svg = document.querySelector('svg');
+                const svg = document.getElementById('canvas').querySelector('svg'); // 캔버스 내부 SVG만
                 const existingLines = svg.querySelectorAll('.connection-line');
                 existingLines.forEach(line => line.remove());
                 
@@ -695,6 +713,7 @@ def create_visualization_html(nodes: List[Dict], edges: List[List[str]]) -> str:
                 }
                 
                 renderConnections();
+                updateCanvasSize();
             }
             
             // 드래그 종료
@@ -750,6 +769,7 @@ def create_visualization_html(nodes: List[Dict], edges: List[List[str]]) -> str:
                     console.log('Adding new node:', newNode);
                     nodes.push(newNode);
                     renderNodes();
+                    updateCanvasSize();
                     
                     // Streamlit에 업데이트 알림
                     if (window.parent && window.parent.postMessage) {
@@ -790,6 +810,7 @@ def create_visualization_html(nodes: List[Dict], edges: List[List[str]]) -> str:
                 console.log('Adding new node:', newNode);
                 nodes.push(newNode);
                 renderNodes();
+                updateCanvasSize();
                 
                 // Streamlit에 업데이트 알림
                 if (window.parent && window.parent.postMessage) {
@@ -909,12 +930,14 @@ def create_visualization_html(nodes: List[Dict], edges: List[List[str]]) -> str:
                 console.log('DOM loaded, rendering nodes');
                 renderNodes();
                 updateZoom();
+                updateCanvasSize();
             });
             
             // 즉시 렌더링도 시도
             setTimeout(function() {
                 renderNodes();
                 updateZoom();
+                updateCanvasSize();
             }, 100);
             
             // 클릭으로 연결 생성 (간단한 버전)
