@@ -579,12 +579,18 @@ def create_visualization_html(nodes: List[Dict], edges: List[List[str]]) -> str:
                         const targetNode = nodes.find(n => n.id === edge[1]);
                         
                         if (sourceNode && targetNode) {
+                            // 노드의 논리적 좌표 사용 (캔버스와 동일한 좌표계)
+                            const sourceX = sourceNode.x + 60; // 노드 중심
+                            const sourceY = sourceNode.y + 40; // 노드 중심
+                            const targetX = targetNode.x + 60; // 노드 중심
+                            const targetY = targetNode.y + 40; // 노드 중심
+                            
                             const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
                             line.setAttribute('class', 'connection-line');
-                            line.setAttribute('x1', sourceNode.x + 60);
-                            line.setAttribute('y1', sourceNode.y + 40);
-                            line.setAttribute('x2', targetNode.x + 60);
-                            line.setAttribute('y2', targetNode.y + 40);
+                            line.setAttribute('x1', sourceX);
+                            line.setAttribute('y1', sourceY);
+                            line.setAttribute('x2', targetX);
+                            line.setAttribute('y2', targetY);
                             
                             svg.appendChild(line);
                         }
@@ -789,7 +795,10 @@ def create_visualization_html(nodes: List[Dict], edges: List[List[str]]) -> str:
             
             function updateZoom() {
                 const canvas = document.getElementById('canvas');
-                canvas.style.transform = 'translate(' + panX + 'px, ' + panY + 'px) scale(' + zoomLevel + ')';
+                
+                // 캔버스에만 transform 적용 (자식 요소들은 자동으로 상속)
+                const transform = 'translate(' + panX + 'px, ' + panY + 'px) scale(' + zoomLevel + ')';
+                canvas.style.transform = transform;
                 canvas.style.transformOrigin = '0 0';
                 
                 document.getElementById('zoomLevel').textContent = Math.round(zoomLevel * 100) + '%';
@@ -851,7 +860,12 @@ def create_visualization_html(nodes: List[Dict], edges: List[List[str]]) -> str:
                 if (isPanning) {
                     panX = e.clientX - panStart.x;
                     panY = e.clientY - panStart.y;
-                    updateZoom();
+                    
+                    // 캔버스에만 transform 적용 (자식 요소들은 자동으로 상속)
+                    const canvas = document.getElementById('canvas');
+                    const transform = 'translate(' + panX + 'px, ' + panY + 'px) scale(' + zoomLevel + ')';
+                    
+                    canvas.style.transform = transform;
                 }
             });
             
@@ -880,12 +894,13 @@ def create_visualization_html(nodes: List[Dict], edges: List[List[str]]) -> str:
             // 클릭으로 연결 생성 (간단한 버전)
             let connectionStart = null;
             document.getElementById('canvas').addEventListener('click', function(e) {
-                if (e.target.classList.contains('node')) {
-                    const nodeId = e.target.dataset.nodeId;
+                const nodeEl = e.target.closest('.node');
+                if (nodeEl) {
+                    const nodeId = nodeEl.dataset.nodeId;
                     
                     if (!connectionStart) {
                         connectionStart = nodeId;
-                        e.target.style.border = '3px solid #ffc107';
+                        nodeEl.style.border = '3px solid #ffc107';
                     } else if (connectionStart !== nodeId) {
                         // 연결 생성
                         const newEdge = [connectionStart, nodeId];
