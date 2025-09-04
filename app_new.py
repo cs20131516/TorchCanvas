@@ -259,12 +259,24 @@ def create_visualization_html(nodes: List[Dict], edges: List[List[str]]) -> str:
             
             .canvas {{
                 width: 100%;
-                height: 600px;
+                height: 800px;
                 background: white;
                 border: 2px dashed #ddd;
                 border-radius: 10px;
                 position: relative;
                 overflow: hidden;
+                cursor: grab;
+            }}
+            
+            .canvas:active {{
+                cursor: grabbing;
+            }}
+            
+            .canvas-container {{
+                position: relative;
+                overflow: hidden;
+                width: 100%;
+                height: 800px;
             }}
             
             .node {{
@@ -403,6 +415,65 @@ def create_visualization_html(nodes: List[Dict], edges: List[List[str]]) -> str:
             .btn-danger:hover {{
                 background: #c82333;
             }}
+            
+            .zoom-controls {{
+                position: fixed;
+                top: 20px;
+                right: 200px;
+                background: white;
+                border-radius: 10px;
+                padding: 10px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                z-index: 1000;
+                display: flex;
+                gap: 5px;
+            }}
+            
+            .zoom-btn {{
+                background: #6c757d;
+                color: white;
+                border: none;
+                padding: 8px 12px;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 16px;
+                font-weight: bold;
+                transition: all 0.2s ease;
+            }}
+            
+            .zoom-btn:hover {{
+                background: #5a6268;
+                transform: scale(1.05);
+            }}
+            
+            .zoom-level {{
+                background: #f8f9fa;
+                color: #495057;
+                border: 1px solid #dee2e6;
+                padding: 8px 12px;
+                border-radius: 4px;
+                font-size: 14px;
+                font-weight: bold;
+                min-width: 60px;
+                text-align: center;
+            }}
+            
+            .popup-btn {{
+                background: #28a745;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 6px;
+                cursor: pointer;
+                margin: 4px;
+                font-size: 14px;
+                transition: all 0.2s ease;
+            }}
+            
+            .popup-btn:hover {{
+                background: #218838;
+                transform: translateY(-1px);
+            }}
         </style>
     </head>
     <body>
@@ -424,23 +495,34 @@ def create_visualization_html(nodes: List[Dict], edges: List[List[str]]) -> str:
     html += """
         </div>
         
+        <!-- 줌 컨트롤 -->
+        <div class="zoom-controls">
+            <button class="zoom-btn" onclick="zoomOut()">-</button>
+            <div class="zoom-level" id="zoomLevel">100%</div>
+            <button class="zoom-btn" onclick="zoomIn()">+</button>
+            <button class="zoom-btn" onclick="resetZoom()">⌂</button>
+        </div>
+        
         <!-- 컨트롤 -->
         <div class="controls">
             <h4 style="margin: 0 0 10px 0; color: #333;">컨트롤</h4>
             <button class="btn" onclick="clearCanvas()">전체 삭제</button>
             <button class="btn" onclick="deleteSelected()">선택 삭제</button>
             <button class="btn" onclick="generateCode()">코드 생성</button>
+            <button class="popup-btn" onclick="openPopup()" disabled>🪟 팝업 창 (개발중)</button>
         </div>
         
-        <!-- 캔버스 -->
-        <div class="canvas" id="canvas">
-            <svg style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;">
-                <defs>
-                    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-                        <polygon points="0 0, 10 3.5, 0 7" fill="#666" />
-                    </marker>
-                </defs>
-            </svg>
+        <!-- 캔버스 컨테이너 -->
+        <div class="canvas-container" id="canvasContainer">
+            <div class="canvas" id="canvas">
+                <svg style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;">
+                    <defs>
+                        <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                            <polygon points="0 0, 10 3.5, 0 7" fill="#666" />
+                        </marker>
+                    </defs>
+                </svg>
+            </div>
         </div>
         
         <script>
@@ -449,6 +531,13 @@ def create_visualization_html(nodes: List[Dict], edges: List[List[str]]) -> str:
             let selectedNode = null;
             let isDragging = false;
             let dragOffset = {x: 0, y: 0};
+            
+            // 줌/팬 변수
+            let zoomLevel = 1;
+            let panX = 0;
+            let panY = 0;
+            let isPanning = false;
+            let panStart = {x: 0, y: 0};
             
             // 노드 렌더링
             function renderNodes() {
@@ -680,6 +769,36 @@ def create_visualization_html(nodes: List[Dict], edges: List[List[str]]) -> str:
                 }
             });
             
+            // 줌/팬 함수들
+            function zoomIn() {
+                zoomLevel = Math.min(zoomLevel * 1.2, 3);
+                updateZoom();
+            }
+            
+            function zoomOut() {
+                zoomLevel = Math.max(zoomLevel / 1.2, 0.1);
+                updateZoom();
+            }
+            
+            function resetZoom() {
+                zoomLevel = 1;
+                panX = 0;
+                panY = 0;
+                updateZoom();
+            }
+            
+            function updateZoom() {
+                const canvas = document.getElementById('canvas');
+                canvas.style.transform = 'translate(' + panX + 'px, ' + panY + 'px) scale(' + zoomLevel + ')';
+                canvas.style.transformOrigin = '0 0';
+                
+                document.getElementById('zoomLevel').textContent = Math.round(zoomLevel * 100) + '%';
+            }
+            
+            function openPopup() {
+                alert('팝업 창 기능은 현재 개발 중입니다. 곧 사용 가능합니다!');
+            }
+            
             // 컨트롤 함수들
             function clearCanvas() {
                 if (confirm('모든 노드를 삭제하시겠습니까?')) {
@@ -710,6 +829,37 @@ def create_visualization_html(nodes: List[Dict], edges: List[List[str]]) -> str:
                 }
             }
             
+            // 마우스 휠 줌 이벤트
+            document.getElementById('canvasContainer').addEventListener('wheel', function(e) {
+                e.preventDefault();
+                const delta = e.deltaY > 0 ? 0.9 : 1.1;
+                zoomLevel = Math.max(0.1, Math.min(3, zoomLevel * delta));
+                updateZoom();
+            });
+            
+            // 팬 기능 (캔버스 드래그)
+            document.getElementById('canvasContainer').addEventListener('mousedown', function(e) {
+                if (e.target === this || e.target.classList.contains('canvas')) {
+                    isPanning = true;
+                    panStart.x = e.clientX - panX;
+                    panStart.y = e.clientY - panY;
+                    this.style.cursor = 'grabbing';
+                }
+            });
+            
+            document.addEventListener('mousemove', function(e) {
+                if (isPanning) {
+                    panX = e.clientX - panStart.x;
+                    panY = e.clientY - panStart.y;
+                    updateZoom();
+                }
+            });
+            
+            document.addEventListener('mouseup', function() {
+                isPanning = false;
+                document.getElementById('canvasContainer').style.cursor = 'grab';
+            });
+            
             // 초기 렌더링
             console.log('Initial nodes:', nodes);
             console.log('Initial edges:', edges);
@@ -718,10 +868,14 @@ def create_visualization_html(nodes: List[Dict], edges: List[List[str]]) -> str:
             document.addEventListener('DOMContentLoaded', function() {
                 console.log('DOM loaded, rendering nodes');
                 renderNodes();
+                updateZoom();
             });
             
             // 즉시 렌더링도 시도
-            setTimeout(renderNodes, 100);
+            setTimeout(function() {
+                renderNodes();
+                updateZoom();
+            }, 100);
             
             // 클릭으로 연결 생성 (간단한 버전)
             let connectionStart = null;
@@ -813,7 +967,7 @@ with col1:
     if st.session_state.nodes:
         st.write("- 노드들:", [n['id'] for n in st.session_state.nodes])
     
-    components.html(viz_html, height=650, scrolling=False)
+    components.html(viz_html, height=850, scrolling=False)
     
     # JavaScript에서 데이터 업데이트 처리
     if st.session_state.get('network_update'):
