@@ -1,3 +1,4 @@
+# https://chatgpt.com/c/68b92e18-34a8-8325-94dc-72ef8aeb117c
 # TorchCanvas - 새로운 접근 방식
 # 드래그 앤 드롭 기반 신경망 디자이너
 import streamlit as st
