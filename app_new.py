@@ -448,15 +448,17 @@ def create_visualization_html(nodes: List[Dict], edges: List[List[str]]) -> str:
             let edges = """ + json.dumps(edges) + """;
             let selectedNode = null;
             let isDragging = false;
-            let dragOffset = {{x: 0, y: 0}};
+            let dragOffset = {x: 0, y: 0};
             
             // 노드 렌더링
-            function renderNodes() {{
+            function renderNodes() {
+                console.log('Rendering nodes:', nodes);
                 const canvas = document.getElementById('canvas');
                 const existingNodes = canvas.querySelectorAll('.node');
                 existingNodes.forEach(node => node.remove());
                 
-                nodes.forEach(node => {{
+                nodes.forEach(node => {
+                    console.log('Creating node:', node);
                     const nodeElement = document.createElement('div');
                     nodeElement.className = 'node';
                     nodeElement.style.left = node.x + 'px';
@@ -464,33 +466,30 @@ def create_visualization_html(nodes: List[Dict], edges: List[List[str]]) -> str:
                     nodeElement.style.backgroundColor = getNodeColor(node.type);
                     nodeElement.dataset.nodeId = node.id;
                     
-                    nodeElement.innerHTML = `
-                        <div class="node-icon">${{getNodeIcon(node.type)}}</div>
-                        <div class="node-label">${{node.id}}</div>
-                    `;
+                    nodeElement.innerHTML = '<div class="node-icon">' + getNodeIcon(node.type) + '</div><div class="node-label">' + node.id + '</div>';
                     
                     // 이벤트 리스너
                     nodeElement.addEventListener('mousedown', startDrag);
                     nodeElement.addEventListener('click', selectNode);
                     
                     canvas.appendChild(nodeElement);
-                }});
+                });
                 
                 renderConnections();
-            }}
+            }
             
             // 연결선 렌더링
-            function renderConnections() {{
+            function renderConnections() {
                 const svg = document.querySelector('svg');
                 const existingLines = svg.querySelectorAll('.connection-line');
                 existingLines.forEach(line => line.remove());
                 
-                edges.forEach(edge => {{
-                    if (edge.length === 2) {{
+                edges.forEach(edge => {
+                    if (edge.length === 2) {
                         const sourceNode = nodes.find(n => n.id === edge[0]);
                         const targetNode = nodes.find(n => n.id === edge[1]);
                         
-                        if (sourceNode && targetNode) {{
+                        if (sourceNode && targetNode) {
                             const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
                             line.setAttribute('class', 'connection-line');
                             line.setAttribute('x1', sourceNode.x + 60);
@@ -499,13 +498,13 @@ def create_visualization_html(nodes: List[Dict], edges: List[List[str]]) -> str:
                             line.setAttribute('y2', targetNode.y + 40);
                             
                             svg.appendChild(line);
-                        }}
-                    }}
-                }});
-            }}
+                        }
+                    }
+                });
+            }
             
             // 노드 색상 가져오기
-            function getNodeColor(type) {{
+            function getNodeColor(type) {
                 const colors = {
     """
     
@@ -515,10 +514,10 @@ def create_visualization_html(nodes: List[Dict], edges: List[List[str]]) -> str:
     html += """
                 };
                 return colors[type] || '#666';
-            }}
+            }
             
             // 노드 아이콘 가져오기
-            function getNodeIcon(type) {{
+            function getNodeIcon(type) {
                 const icons = {
     """
     
@@ -528,10 +527,10 @@ def create_visualization_html(nodes: List[Dict], edges: List[List[str]]) -> str:
     html += """
                 };
                 return icons[type] || '❓';
-            }}
+            }
             
             // 드래그 시작
-            function startDrag(e) {{
+            function startDrag(e) {
                 e.preventDefault();
                 isDragging = true;
                 selectedNode = e.target.closest('.node');
@@ -544,10 +543,10 @@ def create_visualization_html(nodes: List[Dict], edges: List[List[str]]) -> str:
                 
                 document.addEventListener('mousemove', drag);
                 document.addEventListener('mouseup', endDrag);
-            }}
+            }
             
             // 드래그 중
-            function drag(e) {{
+            function drag(e) {
                 if (!isDragging || !selectedNode) return;
                 
                 const canvas = document.getElementById('canvas');
@@ -569,46 +568,46 @@ def create_visualization_html(nodes: List[Dict], edges: List[List[str]]) -> str:
                 // 노드 데이터 업데이트
                 const nodeId = selectedNode.dataset.nodeId;
                 const node = nodes.find(n => n.id === nodeId);
-                if (node) {{
+                if (node) {
                     node.x = clampedX;
                     node.y = clampedY;
-                }}
+                }
                 
                 renderConnections();
-            }}
+            }
             
             // 드래그 종료
-            function endDrag() {{
+            function endDrag() {
                 isDragging = false;
                 selectedNode = null;
                 document.removeEventListener('mousemove', drag);
                 document.removeEventListener('mouseup', endDrag);
-            }}
+            }
             
             // 노드 선택
-            function selectNode(e) {{
+            function selectNode(e) {
                 e.stopPropagation();
                 
                 // 기존 선택 해제
-                document.querySelectorAll('.node').forEach(node => {{
+                document.querySelectorAll('.node').forEach(node => {
                     node.classList.remove('selected');
-                }});
+                });
                 
                 // 새 노드 선택
                 const node = e.target.closest('.node');
                 node.classList.add('selected');
                 selectedNode = node;
-            }}
+            }
             
             // 팔레트에서 드래그 시작 및 클릭 이벤트
-            document.querySelectorAll('.palette-item').forEach(item => {{
-                item.addEventListener('dragstart', function(e) {{
+            document.querySelectorAll('.palette-item').forEach(item => {
+                item.addEventListener('dragstart', function(e) {
                     e.dataTransfer.setData('text/plain', this.dataset.type);
                     console.log('Drag started:', this.dataset.type);
-                }});
+                });
                 
                 // 클릭으로도 노드 추가 가능
-                item.addEventListener('click', function() {{
+                item.addEventListener('click', function() {
                     const nodeType = this.dataset.type;
                     console.log('Click to add node:', nodeType);
                     
@@ -619,36 +618,36 @@ def create_visualization_html(nodes: List[Dict], edges: List[List[str]]) -> str:
                     const y = rect.height / 2 - 40;
                     
                     const nodeId = nodeType.toLowerCase() + '_' + Date.now();
-                    const newNode = {{
+                    const newNode = {
                         id: nodeId,
                         type: nodeType,
                         x: x,
                         y: y,
-                        params: {{}}
-                    }};
+                        params: {}
+                    };
                     
                     console.log('Adding new node:', newNode);
                     nodes.push(newNode);
                     renderNodes();
                     
                     // Streamlit에 업데이트 알림
-                    if (window.parent && window.parent.postMessage) {{
-                        window.parent.postMessage({{
+                    if (window.parent && window.parent.postMessage) {
+                        window.parent.postMessage({
                             type: 'update_network',
                             nodes: nodes,
                             edges: edges
-                        }}, '*');
-                    }}
-                }});
-            }});
+                        }, '*');
+                    }
+                });
+            });
             
             // 캔버스에 드롭
-            document.getElementById('canvas').addEventListener('dragover', function(e) {{
+            document.getElementById('canvas').addEventListener('dragover', function(e) {
                 e.preventDefault();
                 e.dataTransfer.dropEffect = 'copy';
-            }});
+            });
             
-            document.getElementById('canvas').addEventListener('drop', function(e) {{
+            document.getElementById('canvas').addEventListener('drop', function(e) {
                 e.preventDefault();
                 const nodeType = e.dataTransfer.getData('text/plain');
                 console.log('Drop event:', nodeType);
@@ -659,92 +658,102 @@ def create_visualization_html(nodes: List[Dict], edges: List[List[str]]) -> str:
                 
                 // 새 노드 생성
                 const nodeId = nodeType.toLowerCase() + '_' + Date.now();
-                const newNode = {{
+                const newNode = {
                     id: nodeId,
                     type: nodeType,
                     x: Math.max(0, Math.min(x, rect.width - 120)),
                     y: Math.max(0, Math.min(y, rect.height - 80)),
-                    params: {{}}
-                }};
+                    params: {}
+                };
                 
                 console.log('Adding new node:', newNode);
                 nodes.push(newNode);
                 renderNodes();
                 
                 // Streamlit에 업데이트 알림
-                if (window.parent && window.parent.postMessage) {{
-                    window.parent.postMessage({{
+                if (window.parent && window.parent.postMessage) {
+                    window.parent.postMessage({
                         type: 'update_network',
                         nodes: nodes,
                         edges: edges
-                    }}, '*');
-                }}
-            }});
+                    }, '*');
+                }
+            });
             
             // 컨트롤 함수들
-            function clearCanvas() {{
-                if (confirm('모든 노드를 삭제하시겠습니까?')) {{
+            function clearCanvas() {
+                if (confirm('모든 노드를 삭제하시겠습니까?')) {
                     nodes = [];
                     edges = [];
                     renderNodes();
-                }}
-            }}
+                }
+            }
             
-            function deleteSelected() {{
-                if (selectedNode) {{
+            function deleteSelected() {
+                if (selectedNode) {
                     const nodeId = selectedNode.dataset.nodeId;
                     nodes = nodes.filter(n => n.id !== nodeId);
                     edges = edges.filter(e => e[0] !== nodeId && e[1] !== nodeId);
                     renderNodes();
                     selectedNode = null;
-                }}
-            }}
+                }
+            }
             
-            function generateCode() {{
+            function generateCode() {
                 // Streamlit에 데이터 전송
-                if (window.parent && window.parent.postMessage) {{
-                    window.parent.postMessage({{
+                if (window.parent && window.parent.postMessage) {
+                    window.parent.postMessage({
                         type: 'update_network',
                         nodes: nodes,
                         edges: edges
-                    }}, '*');
-                }}
-            }}
+                    }, '*');
+                }
+            }
             
             // 초기 렌더링
-            renderNodes();
+            console.log('Initial nodes:', nodes);
+            console.log('Initial edges:', edges);
+            
+            // DOM이 로드된 후 렌더링
+            document.addEventListener('DOMContentLoaded', function() {
+                console.log('DOM loaded, rendering nodes');
+                renderNodes();
+            });
+            
+            // 즉시 렌더링도 시도
+            setTimeout(renderNodes, 100);
             
             // 클릭으로 연결 생성 (간단한 버전)
             let connectionStart = null;
-            document.getElementById('canvas').addEventListener('click', function(e) {{
-                if (e.target.classList.contains('node')) {{
+            document.getElementById('canvas').addEventListener('click', function(e) {
+                if (e.target.classList.contains('node')) {
                     const nodeId = e.target.dataset.nodeId;
                     
-                    if (!connectionStart) {{
+                    if (!connectionStart) {
                         connectionStart = nodeId;
                         e.target.style.border = '3px solid #ffc107';
-                    }} else if (connectionStart !== nodeId) {{
+                    } else if (connectionStart !== nodeId) {
                         // 연결 생성
                         const newEdge = [connectionStart, nodeId];
-                        if (!edges.some(e => e[0] === newEdge[0] && e[1] === newEdge[1])) {{
+                        if (!edges.some(e => e[0] === newEdge[0] && e[1] === newEdge[1])) {
                             edges.push(newEdge);
                             renderConnections();
-                        }}
+                        }
                         
                         // 연결 모드 해제
-                        document.querySelectorAll('.node').forEach(node => {{
+                        document.querySelectorAll('.node').forEach(node => {
                             node.style.border = '2px solid transparent';
-                        }});
+                        });
                         connectionStart = null;
-                    }}
-                }} else {{
+                    }
+                } else {
                     // 캔버스 클릭 시 연결 모드 해제
-                    document.querySelectorAll('.node').forEach(node => {{
+                    document.querySelectorAll('.node').forEach(node => {
                         node.style.border = '2px solid transparent';
-                    }});
+                    });
                     connectionStart = null;
-                }}
-            }});
+                }
+            });
         </script>
     </body>
     </html>
@@ -796,6 +805,14 @@ with col1:
     
     # 시각화 HTML 생성 및 표시
     viz_html = create_visualization_html(st.session_state.nodes, st.session_state.edges)
+    
+    # 디버깅 정보 표시
+    st.write("🔍 디버깅 정보:")
+    st.write(f"- 노드 수: {len(st.session_state.nodes)}")
+    st.write(f"- 연결 수: {len(st.session_state.edges)}")
+    if st.session_state.nodes:
+        st.write("- 노드들:", [n['id'] for n in st.session_state.nodes])
+    
     components.html(viz_html, height=650, scrolling=False)
     
     # JavaScript에서 데이터 업데이트 처리
@@ -852,18 +869,21 @@ with col2:
         4. 오른쪽에서 생성된 PyTorch 코드 확인
         """)
 
-# JavaScript 메시지 처리
+# JavaScript 메시지 처리 (개선된 버전)
 if st.session_state.get('js_message'):
     message = st.session_state.js_message
     if message.get('type') == 'update_network':
-        st.session_state.network_update = message
+        st.session_state.nodes = message.get('nodes', [])
+        st.session_state.edges = message.get('edges', [])
         st.session_state.js_message = None
         st.rerun()
 
-# JavaScript 메시지 리스너 추가
+# JavaScript 메시지 리스너 추가 (개선된 버전)
 js_listener = """
 <script>
+console.log('Message listener loaded');
 window.addEventListener('message', function(event) {
+    console.log('Received message:', event.data);
     if (event.data.type === 'update_network') {
         // Streamlit에 메시지 전송
         window.parent.postMessage({
